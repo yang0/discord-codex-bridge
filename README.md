@@ -31,11 +31,13 @@
 ```env
 DISCORD_BOT_TOKEN=你的机器人 token
 DISCORD_CHANNEL_ID=1479951053494554736
+TMUX_BIN=/home/yang0/.local/bin/tmux
 TMUX_SESSION=oc_backup
 ```
 
 说明：
 - `TMUX_SESSION=oc_backup` 会优先匹配精确 session 名；没有时再匹配 session group；还没有时匹配 `oc_backup-*`
+- `TMUX_BIN` 建议直接配成 tmux 绝对路径，避免 systemd 用户服务拿到的 PATH 不完整
 - Codex 运行判定只看 tmux 最后 10 行里是否出现 `esc to interrupt`
 - 状态保存在 `STATE_PATH` 指向的本地 JSON 文件里，服务重启后会恢复 active task 和 queue
 

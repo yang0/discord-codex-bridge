@@ -27,7 +27,7 @@ class DiscordCodexBridge(discord.Client):
         super().__init__(intents=intents)
 
         self.settings = settings
-        self.tmux = tmux_bridge or TmuxBridge()
+        self.tmux = tmux_bridge or TmuxBridge(tmux_bin=settings.tmux_bin)
         self.state_store = JsonStateStore(settings.state_path)
         self.controller = BridgeController(
             progress_interval_sec=settings.progress_interval_sec,
@@ -35,6 +35,7 @@ class DiscordCodexBridge(discord.Client):
         )
         self.monitor_task: asyncio.Task[None] | None = None
         self.channel: discord.abc.Messageable | None = None
+        self.last_dispatch_error_at: datetime | None = None
 
     async def on_ready(self) -> None:
         self.channel = self.get_channel(self.settings.discord_channel_id) or await self.fetch_channel(
@@ -134,17 +135,38 @@ class DiscordCodexBridge(discord.Client):
         return (now - last_progress_at).total_seconds() >= self.settings.progress_interval_sec
 
     async def _execute_effects(self, effects) -> None:
+        suppress_followup_message = False
         for effect in effects:
             if effect.kind == "dispatch" and effect.request is not None:
-                await asyncio.to_thread(
-                    self.tmux.send_message,
-                    self.settings.tmux_session,
-                    self.settings.tmux_window,
-                    self.settings.tmux_pane,
-                    effect.request.content,
-                )
+                try:
+                    await asyncio.to_thread(
+                        self.tmux.send_message,
+                        self.settings.tmux_session,
+                        self.settings.tmux_window,
+                        self.settings.tmux_pane,
+                        effect.request.content,
+                    )
+                except Exception as exc:
+                    LOGGER.exception("dispatch to tmux failed")
+                    self.controller.rollback_failed_dispatch(effect.request.request_id)
+                    self.state_store.save(self.controller.state)
+                    suppress_followup_message = True
+                    if self._should_notify_dispatch_error():
+                        self.last_dispatch_error_at = _utcnow()
+                        await self._send_channel_message(
+                            f"转发到 tmux 失败，消息暂存未送达：{type(exc).__name__}: {exc}"
+                        )
             elif effect.kind == "discord_message":
+                if suppress_followup_message:
+                    suppress_followup_message = False
+                    continue
                 await self._send_channel_message(effect.text)
+
+    def _should_notify_dispatch_error(self) -> bool:
+        if self.last_dispatch_error_at is None:
+            return True
+        elapsed = (_utcnow() - self.last_dispatch_error_at).total_seconds()
+        return elapsed >= self.settings.progress_interval_sec
 
     async def _send_channel_message(self, text: str) -> None:
         if self.channel is None:

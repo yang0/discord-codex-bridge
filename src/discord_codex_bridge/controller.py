@@ -61,3 +61,20 @@ class BridgeController:
         if announce:
             effects.append(BridgeEffect(kind="discord_message", text="上一条已结束，开始处理下一条排队消息。"))
         return effects
+
+    def rollback_failed_dispatch(self, request_id: str) -> None:
+        active = self.state.active
+        if active is None or active.request_id != request_id:
+            return
+
+        request = DiscordRequest(
+            request_id=active.request_id,
+            channel_id=active.channel_id,
+            author_id=active.author_id,
+            author_name=active.author_name,
+            content=active.content,
+            created_at=active.created_at,
+        )
+        self.state.active = None
+        if not self.state.queue or self.state.queue[0].request_id != request_id:
+            self.state.queue.insert(0, request)

@@ -23,3 +23,18 @@ def test_split_discord_message_breaks_long_text():
     assert len(parts) == 3
     assert ''.join(parts) == text
     assert all(len(part) <= 1900 for part in parts)
+
+from discord_codex_bridge.config import Settings
+
+
+def test_settings_reads_tmux_bin_from_env(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+            'DISCORD_CHANNEL_ID': '123',
+            'TMUX_BIN': '/custom/tmux',
+        },
+        base_dir=tmp_path,
+    )
+
+    assert settings.tmux_bin == '/custom/tmux'

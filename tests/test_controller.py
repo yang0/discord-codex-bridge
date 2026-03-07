@@ -60,3 +60,14 @@ def test_observe_completion_dispatches_next_queued_request():
     assert len(controller.state.queue) == 0
     assert "last 100 lines" in effects[0].text
     assert "开始处理下一条排队消息" in effects[2].text
+
+
+def test_rollback_failed_dispatch_requeues_active_request():
+    t0 = datetime(2026, 3, 8, 5, 30, tzinfo=timezone.utc)
+    controller = BridgeController(progress_interval_sec=300)
+    controller.submit(make_request("r1", "first"), now=t0)
+
+    controller.rollback_failed_dispatch("r1")
+
+    assert controller.state.active is None
+    assert [item.request_id for item in controller.state.queue] == ["r1"]
