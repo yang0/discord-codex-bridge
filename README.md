@@ -1,41 +1,43 @@
 # Discord Codex Bridge
 
-独立 sidecar 服务，用 Discord bot 直接桥接到 tmux 里的 Codex，会话目标默认是 `oc_backup`。
+An independent sidecar service that bridges a Discord bot to a Codex session running inside tmux. The default tmux session target is `oc_backup`.
 
-目标能力：
-- 把指定 Discord 频道里的消息原样转发到 tmux
-- 如果 Codex 仍在运行，把后续消息排队
-- 每 5 秒检查一次 Codex 是否结束
-- 每 300 秒汇报一次进度
-- 任务结束后发送最后 100 行 tmux 输出
-- 不依赖 OpenClaw，可在 OpenClaw 挂掉时单独存活
+## What It Does
 
-## 运行要求
+- Forwards messages from one configured Discord channel into tmux
+- Queues later messages while Codex is still busy
+- Checks for task completion every 5 seconds
+- Sends a progress update every 300 seconds
+- Sends the last 100 tmux lines when a task finishes
+- Runs independently from OpenClaw so the bridge still works if OpenClaw is down
+
+## Requirements
 
 - Python 3.10+
 - `tmux`
-- Discord bot 已加入目标服务器
-- Discord bot 已启用 `MESSAGE CONTENT INTENT`
-- 目标 tmux pane 中运行着 Codex TUI
+- A Discord bot already added to your server
+- Discord `MESSAGE CONTENT INTENT` enabled for the bot
+- A Codex TUI process already running in the target tmux pane
 
-## 配置
+## Configuration
 
-从 `.env.example` 复制为 `.env`，至少填写：
+Copy `.env.example` to `.env` and set at least:
 
 ```env
-DISCORD_BOT_TOKEN=你的机器人 token
-DISCORD_CHANNEL_ID=你的目标频道 ID
+DISCORD_BOT_TOKEN=your_bot_token
+DISCORD_CHANNEL_ID=your_target_channel_id
 TMUX_BIN=/absolute/path/to/tmux
 TMUX_SESSION=oc_backup
 ```
 
-说明：
-- `TMUX_SESSION=oc_backup` 会优先匹配精确 session 名；没有时再匹配 session group；还没有时匹配 `oc_backup-*`
-- `TMUX_BIN` 建议直接配成 tmux 绝对路径，避免 systemd 用户服务拿到的 PATH 不完整
-- Codex 运行判定只看 tmux 最后 10 行里是否出现 `esc to interrupt`
-- 状态保存在 `STATE_PATH` 指向的本地 JSON 文件里，服务重启后会恢复 active task 和 queue
+Notes:
 
-## 本地启动
+- `TMUX_SESSION=oc_backup` resolves by exact session name first, then session group, then `oc_backup-*` prefix matches.
+- `TMUX_BIN` should usually be set to an absolute path so the service still works under `systemd --user` with a restricted `PATH`.
+- Running state is determined by whether the captured output still contains `esc to interrupt`.
+- State is stored in the local `STATE_PATH` JSON file so active work and queued messages survive service restarts.
+
+## Local Run
 
 ```bash
 cd /path/to/disocord_codex
@@ -46,7 +48,7 @@ cp .env.example .env
 python -m discord_codex_bridge --env-file .env
 ```
 
-## 测试
+## Tests
 
 ```bash
 cd /path/to/disocord_codex
@@ -55,9 +57,7 @@ pytest -q
 
 ## systemd
 
-示例 unit 在 `systemd/discord-codex-bridge.service`，按 `systemd --user` 部署。
-
-安装后：
+The sample unit file is `systemd/discord-codex-bridge.service` and is intended for `systemd --user`.
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -67,8 +67,8 @@ systemctl --user enable --now discord-codex-bridge.service
 systemctl --user status discord-codex-bridge.service
 ```
 
-## 设计边界
+## Design Boundaries
 
-- 这个服务只认一个 Discord 频道，避免把别的频道噪音送进 tmux
-- 服务默认只做“Discord -> tmux”和“定时进度/完成回报”；不会把 tmux 的每一行实时镜像到 Discord
-- 如果 tmux 目标无法解析，当前实现会在日志里报错并在下一轮继续重试；不会自动改写或丢弃用户原消息
+- The service only listens to one Discord channel to avoid forwarding unrelated traffic into tmux.
+- The default behavior is request forwarding plus periodic progress and completion updates. It does not mirror every tmux line to Discord in real time.
+- If the tmux target cannot be resolved, the service logs the error and retries on later monitor ticks instead of rewriting or dropping the user message.

@@ -2,15 +2,15 @@
 
 > **Execution Skill:** Use `superpowers:subagent-driven-development` (same session) or `superpowers:executing-plans` (separate session) to implement this plan task-by-task.
 
-**Goal:** Build an independent backend service that bridges one Discord channel to the `oc_backup` tmux Codex pane, checks completion every minute, and reports progress every five minutes.
+**Goal:** Build an independent backend service that bridges one Discord channel to the `oc_backup` tmux Codex pane, checks completion every 5 seconds, and reports progress every five minutes.
 
-**Architecture:** Use a small Python package with a pure controller for queueing and cadence decisions, a tmux adapter for reliable target resolution and pane capture, and a Discord runtime that only depends on a bot token and channel id. Persist active task and queue to a local JSON state file so the bridge can resume after restarts without depending on OpenClaw.
+**Architecture:** Use a small Python package with a pure controller for queueing and cadence decisions, a tmux adapter for reliable target resolution and pane capture, and a Discord runtime that only depends on a bot token and channel ID. Persist active work and the queue to a local JSON state file so the bridge can resume after restarts without depending on OpenClaw.
 
-**Tech Stack:** Python 3.11+, `discord.py`, `pytest`, tmux, systemd (sample unit)
+**Tech Stack:** Python 3.10+, `discord.py`, `pytest`, tmux, systemd (sample user unit)
 
 ---
 
-### Task 1: Project Skeleton And Red Tests
+### Task 1: Project Skeleton and Red Tests
 
 **Files:**
 - Create: `pyproject.toml`
@@ -30,7 +30,7 @@ def test_resolve_tmux_target_uses_session_group_when_exact_session_missing():
 
 **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/test_tmux_bridge.py -q`
+Run: `pytest tests/test_tmux_bridge.py -q`  
 Expected: FAIL because `discord_codex_bridge.tmux_bridge` is missing.
 
 **Step 3: Write minimal implementation**
@@ -39,7 +39,7 @@ Create the package modules and minimal dataclasses/functions needed for imports.
 
 **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/test_tmux_bridge.py -q`
+Run: `pytest tests/test_tmux_bridge.py -q`  
 Expected: PASS
 
 **Step 5: Commit**
@@ -49,7 +49,7 @@ git add pyproject.toml tests/test_tmux_bridge.py tests/test_controller.py src/di
 git commit -m "feat: add discord codex bridge core"
 ```
 
-### Task 2: Controller And State Persistence
+### Task 2: Controller and State Persistence
 
 **Files:**
 - Create: `src/discord_codex_bridge/models.py`
@@ -73,7 +73,7 @@ def test_tick_completion_dispatches_next_queued_request():
 
 **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/test_controller.py::test_tick_completion_dispatches_next_queued_request -q`
+Run: `pytest tests/test_controller.py::test_tick_completion_dispatches_next_queued_request -q`  
 Expected: FAIL because `BridgeController` behavior is not implemented.
 
 **Step 3: Write minimal implementation**
@@ -82,7 +82,7 @@ Implement queueing, progress cadence, completion detection, and JSON state read/
 
 **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/test_controller.py -q`
+Run: `pytest tests/test_controller.py -q`  
 Expected: PASS
 
 **Step 5: Commit**
@@ -92,7 +92,7 @@ git add src/discord_codex_bridge/models.py src/discord_codex_bridge/controller.p
 git commit -m "feat: add bridge controller and state persistence"
 ```
 
-### Task 3: Runtime Glue And Docs
+### Task 3: Runtime Glue and Docs
 
 **Files:**
 - Create: `src/discord_codex_bridge/config.py`
@@ -113,16 +113,16 @@ def test_running_detection_uses_esc_to_interrupt_only():
 
 **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/test_tmux_bridge.py::test_pane_indicates_running_uses_esc_to_interrupt_marker -q`
+Run: `pytest tests/test_tmux_bridge.py::test_pane_indicates_running_uses_esc_to_interrupt_marker -q`  
 Expected: FAIL because the helper is not implemented.
 
 **Step 3: Write minimal implementation**
 
-Wire Discord client, tmux subprocess calls, progress summaries, message chunking, env loading, and sample deployment docs.
+Wire the Discord client, tmux subprocess calls, progress summaries, message chunking, environment loading, and sample deployment docs.
 
 **Step 4: Run test to verify it passes**
 
-Run: `pytest -q`
+Run: `pytest -q`  
 Expected: PASS
 
 **Step 5: Commit**
