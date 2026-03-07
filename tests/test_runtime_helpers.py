@@ -1,0 +1,25 @@
+from pathlib import Path
+
+from discord_codex_bridge.config import load_env_file
+from discord_codex_bridge.summary import split_discord_message
+
+
+def test_load_env_file_applies_missing_values_only(tmp_path: Path):
+    env_path = tmp_path / '.env'
+    env_path.write_text('A=1\nB=two words\n')
+
+    env = {'B': 'keep'}
+    load_env_file(env_path, env)
+
+    assert env['A'] == '1'
+    assert env['B'] == 'keep'
+
+
+def test_split_discord_message_breaks_long_text():
+    text = 'x' * 4500
+
+    parts = split_discord_message(text, limit=1900)
+
+    assert len(parts) == 3
+    assert ''.join(parts) == text
+    assert all(len(part) <= 1900 for part in parts)
