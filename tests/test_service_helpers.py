@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from discord_codex_bridge.service import should_treat_task_as_completed
+from discord_codex_bridge.service import runtime_output_indicates_running, should_treat_task_as_completed
 
 
 def test_completion_is_suppressed_during_startup_grace_window():
@@ -40,3 +40,8 @@ def test_completion_is_allowed_after_grace_when_no_marker_remains():
         completion_text='final answer\nPONG',
         startup_grace_sec=3,
     ) is True
+
+def test_runtime_output_indicates_running_if_marker_exists_anywhere():
+    output = "header\npartial output\n◦ Working (2s • esc to interrupt)\nfooter"
+
+    assert runtime_output_indicates_running(output) is True

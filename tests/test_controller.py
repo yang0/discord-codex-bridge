@@ -71,3 +71,28 @@ def test_rollback_failed_dispatch_requeues_active_request():
 
     assert controller.state.active is None
     assert [item.request_id for item in controller.state.queue] == ["r1"]
+
+
+def test_queue_request_appends_without_changing_active():
+    t0 = datetime(2026, 3, 8, 5, 30, tzinfo=timezone.utc)
+    controller = BridgeController(progress_interval_sec=300)
+    controller.submit(make_request("r1", "first"), now=t0)
+
+    position = controller.queue_request(make_request("r2", "queued"))
+
+    assert position == 1
+    assert controller.state.active is not None
+    assert [item.request_id for item in controller.state.queue] == ["r2"]
+
+
+def test_clear_queue_returns_removed_count():
+    t0 = datetime(2026, 3, 8, 5, 30, tzinfo=timezone.utc)
+    controller = BridgeController(progress_interval_sec=300)
+    controller.submit(make_request("r1", "first"), now=t0)
+    controller.queue_request(make_request("r2", "queued"))
+    controller.queue_request(make_request("r3", "queued again"))
+
+    removed = controller.clear_queue()
+
+    assert removed == 2
+    assert controller.state.queue == []

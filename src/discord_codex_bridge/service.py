@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
 import logging
 from datetime import datetime, timezone
 
@@ -10,6 +11,7 @@ import discord
 from discord_codex_bridge.config import Settings
 from discord_codex_bridge.controller import BridgeController
 from discord_codex_bridge.models import DiscordRequest
+from discord_codex_bridge.shortcuts import ShortcutCommand, build_running_shortcut_help, parse_shortcut_command
 from discord_codex_bridge.state import JsonStateStore
 from discord_codex_bridge.summary import format_completion, split_discord_message, summarize_progress
 from discord_codex_bridge.tmux_bridge import RUNNING_MARKER, RUNNING_PROBE_LINES, TmuxBridge, pane_indicates_running
@@ -17,6 +19,13 @@ from discord_codex_bridge.tmux_bridge import RUNNING_MARKER, RUNNING_PROBE_LINES
 
 LOGGER = logging.getLogger(__name__)
 DISPATCH_STARTUP_GRACE_SEC = 3
+
+
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    target: str
+    latest_output: str
+    running: bool
 
 
 class DiscordCodexBridge(discord.Client):
@@ -55,17 +64,28 @@ class DiscordCodexBridge(discord.Client):
         if not content:
             return
 
-        request = DiscordRequest(
-            request_id=str(message.id),
-            channel_id=message.channel.id,
-            author_id=message.author.id,
-            author_name=message.author.display_name,
-            content=content,
-            created_at=_utcnow().isoformat(),
-        )
-        effects = self.controller.submit(request, now=_utcnow())
-        self.state_store.save(self.controller.state)
-        await self._execute_effects(effects)
+        now = _utcnow()
+        try:
+            if self.controller.state.active is None and self.controller.state.queue:
+                await self._kick_idle_queue(now=now)
+
+            snapshot = await self._capture_runtime_snapshot(lines=self.settings.completion_lines)
+            snapshot = await self._reconcile_active_state(snapshot=snapshot, now=now)
+            command = parse_shortcut_command(content)
+
+            if snapshot.running:
+                await self._handle_running_message(
+                    message=message,
+                    command=command,
+                    snapshot=snapshot,
+                    now=now,
+                )
+                return
+
+            await self._handle_idle_message(message=message, command=command, fallback_content=content, now=now)
+        except Exception as exc:
+            LOGGER.exception("failed to handle incoming message")
+            await self._send_channel_message(f"处理消息失败：{type(exc).__name__}: {exc}")
 
     async def close(self) -> None:
         if self.monitor_task is not None:
@@ -189,6 +209,160 @@ class DiscordCodexBridge(discord.Client):
         for chunk in split_discord_message(text):
             await self.channel.send(chunk)
 
+    async def _capture_runtime_snapshot(self, *, lines: int) -> RuntimeSnapshot:
+        target = await asyncio.to_thread(
+            self.tmux.resolve_pane_target,
+            self.settings.tmux_session,
+            self.settings.tmux_window,
+            self.settings.tmux_pane,
+        )
+        latest_output = await asyncio.to_thread(self.tmux.capture_tail, target, lines=lines)
+        return RuntimeSnapshot(
+            target=target,
+            latest_output=latest_output,
+            running=runtime_output_indicates_running(latest_output),
+        )
+
+    async def _reconcile_active_state(self, *, snapshot: RuntimeSnapshot, now: datetime) -> RuntimeSnapshot:
+        active = self.controller.state.active
+        if active is None or snapshot.running:
+            return snapshot
+
+        if not should_treat_task_as_completed(
+            started_at=active.started_at,
+            now=now,
+            probe_text=snapshot.latest_output,
+            completion_text=snapshot.latest_output,
+            startup_grace_sec=DISPATCH_STARTUP_GRACE_SEC,
+        ):
+            return snapshot
+
+        effects = self.controller.observe(
+            active_running=False,
+            now=now,
+            completion_excerpt=format_completion(snapshot.latest_output, last_lines=self.settings.completion_lines),
+        )
+        self.state_store.save(self.controller.state)
+        await self._execute_effects(effects)
+        return await self._capture_runtime_snapshot(lines=self.settings.completion_lines)
+
+    async def _handle_running_message(
+        self,
+        *,
+        message: discord.Message,
+        command: ShortcutCommand | None,
+        snapshot: RuntimeSnapshot,
+        now: datetime,
+    ) -> None:
+        if command is None:
+            await self._send_channel_message(build_running_shortcut_help(snapshot.latest_output))
+            return
+
+        if command.name == "esc":
+            await asyncio.to_thread(
+                self.tmux.send_escape,
+                self.settings.tmux_session,
+                self.settings.tmux_window,
+                self.settings.tmux_pane,
+            )
+            await self._send_channel_message("已向运行中的 Codex 发送 ESC。")
+            return
+
+        if command.name == "queue":
+            if not command.argument:
+                await self._send_channel_message("用法：`$q <text>`")
+                return
+            if self.controller.state.active is None:
+                self.controller.claim_active(self._build_placeholder_request(message, now=now), now=now)
+            request = self._make_request(message, content=command.argument, suffix="queue")
+            position = self.controller.queue_request(request)
+            self.state_store.save(self.controller.state)
+            await self._send_channel_message(f"已加入队列第 {position} 位，当前任务结束后会自动发送。")
+            return
+
+        if command.name == "queue_clear":
+            removed = self.controller.clear_queue()
+            self.state_store.save(self.controller.state)
+            await self._send_channel_message(f"已清空队列，共移除 {removed} 条。")
+            return
+
+        if command.name == "insert":
+            if not command.argument:
+                await self._send_channel_message("用法：`$insert <text>`")
+                return
+            await asyncio.to_thread(
+                self.tmux.send_message,
+                self.settings.tmux_session,
+                self.settings.tmux_window,
+                self.settings.tmux_pane,
+                command.argument,
+            )
+            await self._send_channel_message("已插入到运行中的 Codex。")
+            return
+
+        await self._send_channel_message(build_running_shortcut_help(snapshot.latest_output))
+
+    async def _handle_idle_message(
+        self,
+        *,
+        message: discord.Message,
+        command: ShortcutCommand | None,
+        fallback_content: str,
+        now: datetime,
+    ) -> None:
+        if command is None:
+            request = self._make_request(message, content=fallback_content)
+            effects = self.controller.start_request(request, now=now)
+            self.state_store.save(self.controller.state)
+            await self._execute_effects(effects)
+            return
+
+        if command.name == "esc":
+            await self._send_channel_message("Codex 已结束运行，无需中断。")
+            return
+
+        if command.name == "queue_clear":
+            removed = self.controller.clear_queue()
+            self.state_store.save(self.controller.state)
+            await self._send_channel_message(f"Codex 已结束运行；已清空队列 {removed} 条。")
+            return
+
+        if command.name in {"queue", "insert"}:
+            if not command.argument:
+                usage = "$q <text>" if command.name == "queue" else "$insert <text>"
+                await self._send_channel_message(f"用法：`{usage}`")
+                return
+            request = self._make_request(message, content=command.argument, suffix=command.name)
+            effects = self.controller.start_request(request, now=now)
+            self.state_store.save(self.controller.state)
+            await self._execute_effects(effects)
+            return
+
+        request = self._make_request(message, content=fallback_content)
+        effects = self.controller.start_request(request, now=now)
+        self.state_store.save(self.controller.state)
+        await self._execute_effects(effects)
+
+    def _make_request(self, message: discord.Message, *, content: str, suffix: str = "direct") -> DiscordRequest:
+        return DiscordRequest(
+            request_id=f"{message.id}:{suffix}",
+            channel_id=message.channel.id,
+            author_id=message.author.id,
+            author_name=message.author.display_name,
+            content=content,
+            created_at=_utcnow().isoformat(),
+        )
+
+    def _build_placeholder_request(self, message: discord.Message, *, now: datetime) -> DiscordRequest:
+        return DiscordRequest(
+            request_id=f"external-running:{int(now.timestamp())}",
+            channel_id=message.channel.id,
+            author_id=message.author.id,
+            author_name=message.author.display_name,
+            content="(existing running Codex task)",
+            created_at=now.isoformat(),
+        )
+
 
 def _build_message_content(message: discord.Message) -> str:
     parts = [message.content.strip()] if message.content.strip() else []
@@ -198,6 +372,10 @@ def _build_message_content(message: discord.Message) -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def runtime_output_indicates_running(text: str) -> bool:
+    return RUNNING_MARKER in text or pane_indicates_running(text)
 
 
 def should_treat_task_as_completed(

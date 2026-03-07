@@ -88,6 +88,13 @@ class TmuxBridge:
         tail = self.capture_tail(target, lines=20)
         return DispatchResult(target=target, tail=tail, running=pane_indicates_running(tail))
 
+    def send_escape(self, requested_session: str, window: int, pane: int) -> DispatchResult:
+        target = self.resolve_pane_target(requested_session, window, pane)
+        self._run("send-keys", "-t", target, "Escape")
+        time.sleep(0.3)
+        tail = self.capture_tail(target, lines=20)
+        return DispatchResult(target=target, tail=tail, running=pane_indicates_running(tail))
+
     def _run(self, *args: str) -> str:
         completed = subprocess.run(
             [self.tmux_bin, *args],

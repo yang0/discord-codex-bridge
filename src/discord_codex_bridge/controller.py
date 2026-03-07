@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 
 from discord_codex_bridge.models import ActiveTask, BridgeEffect, BridgeState, DiscordRequest
@@ -13,15 +12,30 @@ class BridgeController:
 
     def submit(self, request: DiscordRequest, *, now: datetime) -> list[BridgeEffect]:
         if self.state.active is None:
-            self.state.active = ActiveTask.from_request(request, now=now)
-            return [
-                BridgeEffect(kind="dispatch", request=request),
-                BridgeEffect(kind="discord_message", text="消息已转发到 tmux，开始处理。"),
-            ]
+            return self.start_request(request, now=now)
 
-        self.state.queue.append(request)
-        position = len(self.state.queue)
+        position = self.queue_request(request)
         return [BridgeEffect(kind="discord_message", text=f"Codex 仍在运行，已排队第 {position} 位。")]
+
+    def start_request(self, request: DiscordRequest, *, now: datetime) -> list[BridgeEffect]:
+        self.state.active = ActiveTask.from_request(request, now=now)
+        return [
+            BridgeEffect(kind="dispatch", request=request),
+            BridgeEffect(kind="discord_message", text="消息已转发到 tmux，开始处理。"),
+        ]
+
+    def queue_request(self, request: DiscordRequest) -> int:
+        self.state.queue.append(request)
+        return len(self.state.queue)
+
+    def clear_queue(self) -> int:
+        removed = len(self.state.queue)
+        self.state.queue.clear()
+        return removed
+
+    def claim_active(self, request: DiscordRequest, *, now: datetime) -> None:
+        if self.state.active is None:
+            self.state.active = ActiveTask.from_request(request, now=now)
 
     def observe(
         self,
