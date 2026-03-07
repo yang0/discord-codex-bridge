@@ -12,10 +12,11 @@ from discord_codex_bridge.controller import BridgeController
 from discord_codex_bridge.models import DiscordRequest
 from discord_codex_bridge.state import JsonStateStore
 from discord_codex_bridge.summary import format_completion, split_discord_message, summarize_progress
-from discord_codex_bridge.tmux_bridge import RUNNING_PROBE_LINES, TmuxBridge, pane_indicates_running
+from discord_codex_bridge.tmux_bridge import RUNNING_MARKER, RUNNING_PROBE_LINES, TmuxBridge, pane_indicates_running
 
 
 LOGGER = logging.getLogger(__name__)
+DISPATCH_STARTUP_GRACE_SEC = 3
 
 
 class DiscordCodexBridge(discord.Client):
@@ -112,6 +113,18 @@ class DiscordCodexBridge(discord.Client):
                 target,
                 lines=self.settings.completion_lines,
             )
+            active = self.controller.state.active
+            assert active is not None
+            if not should_treat_task_as_completed(
+                started_at=active.started_at,
+                now=now,
+                probe_text=probe,
+                completion_text=excerpt,
+                startup_grace_sec=DISPATCH_STARTUP_GRACE_SEC,
+            ):
+                LOGGER.info("completion suppressed; task still appears active")
+                return
+
             effects = self.controller.observe(
                 active_running=False,
                 now=now,
@@ -185,3 +198,24 @@ def _build_message_content(message: discord.Message) -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def should_treat_task_as_completed(
+    *,
+    started_at: str,
+    now: datetime,
+    probe_text: str,
+    completion_text: str,
+    startup_grace_sec: int,
+) -> bool:
+    if pane_indicates_running(probe_text):
+        return False
+
+    started = datetime.fromisoformat(started_at)
+    if (now - started).total_seconds() < startup_grace_sec:
+        return False
+
+    if RUNNING_MARKER in completion_text:
+        return False
+
+    return True
