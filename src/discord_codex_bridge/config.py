@@ -27,7 +27,10 @@ class Settings:
         if not token:
             raise ValueError("DISCORD_BOT_TOKEN is required")
 
-        channel_id = int(env.get("DISCORD_CHANNEL_ID", "1479951053494554736"))
+        channel_raw = env.get("DISCORD_CHANNEL_ID", "").strip()
+        if not channel_raw:
+            raise ValueError("DISCORD_CHANNEL_ID is required")
+        channel_id = int(channel_raw)
         state_path = Path(env.get("STATE_PATH", "./state/bridge_state.json")).expanduser()
         if not state_path.is_absolute():
             state_path = (base_dir / state_path).resolve()

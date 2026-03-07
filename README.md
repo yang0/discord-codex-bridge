@@ -10,12 +10,6 @@
 - 任务结束后发送最后 100 行 tmux 输出
 - 不依赖 OpenClaw，可在 OpenClaw 挂掉时单独存活
 
-## 当前默认频道
-
-- 频道名：`dev-codex-backup`
-- Channel ID：`1479951053494554736`
-- Guild：`1477880687959736440`
-
 ## 运行要求
 
 - Python 3.10+
@@ -30,8 +24,8 @@
 
 ```env
 DISCORD_BOT_TOKEN=你的机器人 token
-DISCORD_CHANNEL_ID=1479951053494554736
-TMUX_BIN=/home/yang0/.local/bin/tmux
+DISCORD_CHANNEL_ID=你的目标频道 ID
+TMUX_BIN=/absolute/path/to/tmux
 TMUX_SESSION=oc_backup
 ```
 
@@ -44,7 +38,7 @@ TMUX_SESSION=oc_backup
 ## 本地启动
 
 ```bash
-cd /home/yang0/projectHome/disocord_codex
+cd /path/to/disocord_codex
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
@@ -55,7 +49,7 @@ python -m discord_codex_bridge --env-file .env
 ## 测试
 
 ```bash
-cd /home/yang0/projectHome/disocord_codex
+cd /path/to/disocord_codex
 pytest -q
 ```
 

@@ -7,7 +7,7 @@ from discord_codex_bridge.models import DiscordRequest
 def make_request(request_id: str, content: str) -> DiscordRequest:
     return DiscordRequest(
         request_id=request_id,
-        channel_id=1479951053494554736,
+        channel_id=123456789012345678,
         author_id=1,
         author_name="tester",
         content=content,

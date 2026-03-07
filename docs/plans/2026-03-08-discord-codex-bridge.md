@@ -23,9 +23,9 @@
 ```python
 def test_resolve_tmux_target_uses_session_group_when_exact_session_missing():
     sessions = [
-        SessionRef(name="oc_backup-2", group="oc_backup", attached=1, last_attached=10),
+        SessionRef(name="bridge-2", group="bridge", attached=1, last_attached=10),
     ]
-    assert resolve_target("oc_backup", 0, 0, sessions) == "oc_backup-2:0.0"
+    assert resolve_target("bridge", 0, 0, sessions) == "bridge-2:0.0"
 ```
 
 **Step 2: Run test to verify it fails**

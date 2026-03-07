@@ -25,6 +25,7 @@ def test_split_discord_message_breaks_long_text():
     assert all(len(part) <= 1900 for part in parts)
 
 from discord_codex_bridge.config import Settings
+import pytest
 
 
 def test_settings_reads_tmux_bin_from_env(tmp_path: Path):
@@ -50,3 +51,13 @@ def test_settings_default_check_interval_is_5_seconds(tmp_path: Path):
     )
 
     assert settings.check_interval_sec == 5
+
+
+def test_settings_requires_discord_channel_id(tmp_path: Path):
+    with pytest.raises(ValueError, match="DISCORD_CHANNEL_ID is required"):
+        Settings.from_env(
+            {
+                'DISCORD_BOT_TOKEN': 'token',
+            },
+            base_dir=tmp_path,
+        )
