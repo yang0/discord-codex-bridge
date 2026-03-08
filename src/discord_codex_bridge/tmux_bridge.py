@@ -76,6 +76,10 @@ class TmuxBridge:
     def capture_tail(self, target: str, *, lines: int) -> str:
         return self._run("capture-pane", "-pt", target, "-S", f"-{lines}")
 
+    def get_pane_current_path(self, requested_session: str, window: int, pane: int) -> str:
+        target = self.resolve_pane_target(requested_session, window, pane)
+        return self._run("display-message", "-p", "-t", target, "#{pane_current_path}").strip()
+
     def task_is_running(self, target: str) -> bool:
         return pane_indicates_running(self.capture_tail(target, lines=RUNNING_PROBE_LINES))
 

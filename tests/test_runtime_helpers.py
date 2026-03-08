@@ -1,6 +1,11 @@
+import json
 from pathlib import Path
 
-from discord_codex_bridge.config import load_env_file
+import pytest
+
+from discord_codex_bridge.ai import build_responses_api_url, load_codex_model_config
+from discord_codex_bridge.config import Settings, load_bridge_routes, load_env_file
+from discord_codex_bridge.shortcuts import parse_shortcut_command
 from discord_codex_bridge.summary import split_discord_message
 
 
@@ -24,15 +29,11 @@ def test_split_discord_message_breaks_long_text():
     assert ''.join(parts) == text
     assert all(len(part) <= 1900 for part in parts)
 
-from discord_codex_bridge.config import Settings
-import pytest
-
 
 def test_settings_reads_tmux_bin_from_env(tmp_path: Path):
     settings = Settings.from_env(
         {
             'DISCORD_BOT_TOKEN': 'token',
-            'DISCORD_CHANNEL_ID': '123',
             'TMUX_BIN': '/custom/tmux',
         },
         base_dir=tmp_path,
@@ -45,7 +46,6 @@ def test_settings_default_check_interval_is_5_seconds(tmp_path: Path):
     settings = Settings.from_env(
         {
             'DISCORD_BOT_TOKEN': 'token',
-            'DISCORD_CHANNEL_ID': '123',
         },
         base_dir=tmp_path,
     )
@@ -53,11 +53,164 @@ def test_settings_default_check_interval_is_5_seconds(tmp_path: Path):
     assert settings.check_interval_sec == 5
 
 
-def test_settings_requires_discord_channel_id(tmp_path: Path):
-    with pytest.raises(ValueError, match="DISCORD_CHANNEL_ID is required"):
-        Settings.from_env(
+def test_settings_default_bridges_config_path_is_local_json(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+        },
+        base_dir=tmp_path,
+    )
+
+    assert settings.bridges_config_path == (tmp_path / 'bridges.local.json').resolve()
+
+
+def test_settings_reads_bridges_config_path_from_env(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+            'BRIDGES_CONFIG_PATH': './runtime/bridges.private.json',
+        },
+        base_dir=tmp_path,
+    )
+
+    assert settings.bridges_config_path == (tmp_path / 'runtime/bridges.private.json').resolve()
+
+
+def test_loads_multiple_bridge_routes_from_local_json(tmp_path: Path):
+    route_file = tmp_path / 'bridges.local.json'
+    route_file.write_text(
+        json.dumps(
             {
-                'DISCORD_BOT_TOKEN': 'token',
-            },
-            base_dir=tmp_path,
+                'defaults': {
+                    'tmux_window': 1,
+                    'tmux_pane': 2,
+                    'progress_interval_sec': 180,
+                },
+                'bridges': [
+                    {
+                        'name': 'alpha',
+                        'enabled': True,
+                        'channel_id': 111,
+                        'tmux_session': 'session_alpha',
+                        'state_path': './state/alpha.json',
+                    },
+                    {
+                        'name': 'beta',
+                        'enabled': True,
+                        'channel_id': 222,
+                        'tmux_session': 'session_beta',
+                        'state_path': './state/beta.json',
+                        'tmux_pane': 4,
+                    },
+                ],
+            }
         )
+    )
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+            'BRIDGES_CONFIG_PATH': str(route_file),
+        },
+        base_dir=tmp_path,
+    )
+
+    routes = load_bridge_routes(settings)
+
+    assert [route.name for route in routes] == ['alpha', 'beta']
+    assert routes[0].channel_id == 111
+    assert routes[0].tmux_window == 1
+    assert routes[0].tmux_pane == 2
+    assert routes[0].progress_interval_sec == 180
+    assert routes[0].state_path == (tmp_path / 'state/alpha.json').resolve()
+    assert routes[1].tmux_pane == 4
+
+
+def test_load_bridge_routes_ignores_disabled_entries(tmp_path: Path):
+    route_file = tmp_path / 'bridges.local.json'
+    route_file.write_text(
+        json.dumps(
+            {
+                'bridges': [
+                    {
+                        'name': 'alpha',
+                        'enabled': False,
+                        'channel_id': 111,
+                        'tmux_session': 'session_alpha',
+                        'state_path': './state/alpha.json',
+                    },
+                    {
+                        'name': 'beta',
+                        'enabled': True,
+                        'channel_id': 222,
+                        'tmux_session': 'session_beta',
+                        'state_path': './state/beta.json',
+                    },
+                ]
+            }
+        )
+    )
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+            'BRIDGES_CONFIG_PATH': str(route_file),
+        },
+        base_dir=tmp_path,
+    )
+
+    routes = load_bridge_routes(settings)
+
+    assert [route.name for route in routes] == ['beta']
+
+
+def test_settings_requires_discord_bot_token(tmp_path: Path):
+    with pytest.raises(ValueError, match='DISCORD_BOT_TOKEN is required'):
+        Settings.from_env({}, base_dir=tmp_path)
+
+
+def test_load_codex_model_config_reads_model_and_auth_from_codex_files(tmp_path: Path):
+    codex_dir = tmp_path / '.codex'
+    codex_dir.mkdir()
+    (codex_dir / 'config.toml').write_text(
+        '\n'.join(
+            [
+                'model = "gpt-5.4"',
+                'model_provider = "gmn"',
+                '',
+                '[model_providers.gmn]',
+                'name = "gmn"',
+                'base_url = "https://gmn.example.com"',
+                'wire_api = "responses"',
+                'requires_openai_auth = true',
+            ]
+        )
+    )
+    (codex_dir / 'auth.json').write_text(json.dumps({'OPENAI_API_KEY': 'secret-key'}))
+
+    config = load_codex_model_config(
+        config_path=codex_dir / 'config.toml',
+        auth_path=codex_dir / 'auth.json',
+    )
+
+    assert config.model == 'gpt-5.4'
+    assert config.base_url == 'https://gmn.example.com'
+    assert config.responses_api_url == 'https://gmn.example.com/v1/responses'
+    assert config.api_key == 'secret-key'
+
+
+def test_build_responses_api_url_preserves_existing_v1_suffix():
+    assert build_responses_api_url('https://api.example.com/v1') == 'https://api.example.com/v1/responses'
+
+
+def test_parse_shortcut_command_supports_help_and_short_insert():
+    help_command = parse_shortcut_command('h')
+    insert_command = parse_shortcut_command('i refine it')
+
+    assert help_command is not None
+    assert help_command.name == 'help'
+    assert insert_command is not None
+    assert insert_command.name == 'insert'
+    assert insert_command.argument == 'refine it'
+
+
+def test_parse_shortcut_command_no_longer_accepts_legacy_insert():
+    assert parse_shortcut_command('$insert refine it') is None

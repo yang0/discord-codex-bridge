@@ -1,0 +1,15 @@
+[Unit]
+Description=Discord Codex Multi Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projectHome/disocord_codex
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/projectHome/disocord_codex/.venv/bin/python -m discord_codex_bridge --env-file %h/projectHome/disocord_codex/.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -54,3 +55,18 @@ class BridgeEffect:
     kind: str
     text: str = ""
     request: DiscordRequest | None = None
+
+
+@dataclass(frozen=True)
+class BridgeRouteConfig:
+    name: str
+    channel_id: int
+    tmux_session: str
+    state_path: Path
+    tmux_window: int
+    tmux_pane: int
+    check_interval_sec: int
+    progress_interval_sec: int
+    progress_capture_lines: int
+    completion_lines: int
+    enabled: bool = True

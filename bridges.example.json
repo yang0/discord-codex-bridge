@@ -1,0 +1,26 @@
+{
+  "defaults": {
+    "tmux_window": 0,
+    "tmux_pane": 0,
+    "check_interval_sec": 5,
+    "progress_interval_sec": 300,
+    "progress_capture_lines": 220,
+    "completion_lines": 100
+  },
+  "bridges": [
+    {
+      "name": "backup",
+      "enabled": true,
+      "channel_id": 123456789012345678,
+      "tmux_session": "session_alpha",
+      "state_path": "./state/bridge_state_backup.json"
+    },
+    {
+      "name": "evolution",
+      "enabled": true,
+      "channel_id": 234567890123456789,
+      "tmux_session": "session_beta",
+      "state_path": "./state/bridge_state_evolution.json"
+    }
+  ]
+}
