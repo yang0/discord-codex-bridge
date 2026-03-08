@@ -173,7 +173,7 @@ COMPLETION_LINES=100
 ## Local Run
 
 ```bash
-cd /path/to/disocord_codex
+cd /path/to/discord-codex-bridge
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
@@ -196,7 +196,7 @@ python -m discord_codex_bridge --env-file .env
 ## Tests
 
 ```bash
-cd /path/to/disocord_codex
+cd /path/to/discord-codex-bridge
 pytest -q
 ```
 
