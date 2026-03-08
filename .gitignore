@@ -8,3 +8,5 @@ bridges.local.json
 state/*.json
 
 *.egg-info/
+# Managed by evolution bootstrap: local Git worktrees
+.worktrees/
