@@ -4,7 +4,13 @@ from pathlib import Path
 import pytest
 
 from discord_codex_bridge.ai import build_responses_api_url, load_codex_model_config
-from discord_codex_bridge.config import Settings, load_bridge_routes, load_env_file
+from discord_codex_bridge.config import (
+    Settings,
+    load_bridge_routes,
+    load_env_file,
+    resolve_terminal_backend_name,
+)
+from discord_codex_bridge.models import WezTermTargetConfig
 from discord_codex_bridge.state import JsonStateStore
 from discord_codex_bridge.shortcuts import parse_shortcut_command
 from discord_codex_bridge.summary import split_discord_message
@@ -41,6 +47,41 @@ def test_settings_reads_tmux_bin_from_env(tmp_path: Path):
     )
 
     assert settings.tmux_bin == '/custom/tmux'
+
+
+def test_settings_default_terminal_backend_is_auto(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+        },
+        base_dir=tmp_path,
+    )
+
+    assert settings.terminal_backend == 'auto'
+
+
+def test_settings_reads_terminal_backend_from_env(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+            'TERMINAL_BACKEND': 'wezterm',
+        },
+        base_dir=tmp_path,
+    )
+
+    assert settings.terminal_backend == 'wezterm'
+
+
+def test_resolve_terminal_backend_name_uses_tmux_for_linux():
+    assert resolve_terminal_backend_name('auto', platform='linux') == 'tmux'
+
+
+def test_resolve_terminal_backend_name_uses_wezterm_for_windows():
+    assert resolve_terminal_backend_name('auto', platform='win32') == 'wezterm'
+
+
+def test_resolve_terminal_backend_name_preserves_explicit_value():
+    assert resolve_terminal_backend_name('wezterm', platform='linux') == 'wezterm'
 
 
 def test_settings_default_check_interval_is_5_seconds(tmp_path: Path):
@@ -161,6 +202,58 @@ def test_load_bridge_routes_ignores_disabled_entries(tmp_path: Path):
     routes = load_bridge_routes(settings)
 
     assert [route.name for route in routes] == ['beta']
+
+
+def test_load_bridge_routes_supports_wezterm_terminal_target(tmp_path: Path):
+    route_file = tmp_path / 'bridges.local.json'
+    route_file.write_text(
+        json.dumps(
+            {
+                'bridges': [
+                    {
+                        'name': 'windows-dev',
+                        'enabled': True,
+                        'channel_id': 333,
+                        'terminal_target': {
+                            'workspace': 'codex',
+                            'pane_title_regex': '^Codex: windows-dev$',
+                            'cwd_contains': 'projectHome',
+                        },
+                        'state_path': './state/windows-dev.json',
+                    }
+                ]
+            }
+        )
+    )
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+        },
+        base_dir=tmp_path,
+    )
+    settings = Settings(
+        discord_bot_token=settings.discord_bot_token,
+        tmux_bin=settings.tmux_bin,
+        tmux_window=settings.tmux_window,
+        tmux_pane=settings.tmux_pane,
+        check_interval_sec=settings.check_interval_sec,
+        progress_interval_sec=settings.progress_interval_sec,
+        progress_capture_lines=settings.progress_capture_lines,
+        completion_lines=settings.completion_lines,
+        bridges_config_path=route_file,
+        terminal_backend='wezterm',
+        wezterm_bin='wezterm',
+    )
+
+    routes = load_bridge_routes(settings)
+
+    assert len(routes) == 1
+    assert routes[0].tmux_session == ''
+    assert routes[0].terminal_target == WezTermTargetConfig(
+        workspace='codex',
+        pane_title_regex='^Codex: windows-dev$',
+        cwd_contains='projectHome',
+    )
 
 
 def test_settings_requires_discord_bot_token(tmp_path: Path):

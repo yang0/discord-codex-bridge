@@ -60,15 +60,32 @@ class BridgeEffect:
 
 
 @dataclass(frozen=True)
+class WezTermTargetConfig:
+    workspace: str
+    pane_title: str | None = None
+    pane_title_regex: str | None = None
+    cwd_contains: str | None = None
+
+
+@dataclass(frozen=True)
 class BridgeRouteConfig:
     name: str
     channel_id: int
-    tmux_session: str
     state_path: Path
-    tmux_window: int
-    tmux_pane: int
     check_interval_sec: int
     progress_interval_sec: int
     progress_capture_lines: int
     completion_lines: int
     enabled: bool = True
+    tmux_session: str = ""
+    tmux_window: int = 0
+    tmux_pane: int = 0
+    terminal_target: WezTermTargetConfig | None = None
+
+    @property
+    def uses_tmux_target(self) -> bool:
+        return bool(self.tmux_session)
+
+    @property
+    def uses_wezterm_target(self) -> bool:
+        return self.terminal_target is not None

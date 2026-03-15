@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping
 
-from discord_codex_bridge.models import BridgeRouteConfig
+from discord_codex_bridge.models import BridgeRouteConfig, WezTermTargetConfig
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,8 @@ class Settings:
     progress_capture_lines: int
     completion_lines: int
     bridges_config_path: Path
+    terminal_backend: str = "auto"
+    wezterm_bin: str = "wezterm"
 
     @classmethod
     def from_env(cls, env: MutableMapping[str, str], *, base_dir: Path) -> "Settings":
@@ -42,7 +45,12 @@ class Settings:
             progress_capture_lines=int(env.get("PROGRESS_CAPTURE_LINES", "220")),
             completion_lines=int(env.get("COMPLETION_LINES", "100")),
             bridges_config_path=bridges_config_path,
+            terminal_backend=env.get("TERMINAL_BACKEND", "auto").strip().lower() or "auto",
+            wezterm_bin=_resolve_wezterm_bin(env),
         )
+
+    def resolved_terminal_backend(self, *, platform: str | None = None) -> str:
+        return resolve_terminal_backend_name(self.terminal_backend, platform=platform)
 
 
 def load_env_file(path: Path, env: MutableMapping[str, str] | None = None) -> MutableMapping[str, str]:
@@ -100,22 +108,29 @@ def load_bridge_routes(settings: Settings) -> list[BridgeRouteConfig]:
         }
         merged.update(defaults_payload)
         merged.update(raw_route)
+        terminal_target = _load_wezterm_target(merged, index=index)
+        tmux_session = str(merged.get("tmux_session", "")).strip()
+        if not tmux_session and terminal_target is None:
+            raise ValueError(
+                f"Bridge entry at index {index} requires either non-empty 'tmux_session' or 'terminal_target'"
+            )
 
         route = BridgeRouteConfig(
             name=_require_non_empty_string(merged, "name", index=index),
             channel_id=_require_int(merged, "channel_id", index=index),
-            tmux_session=_require_non_empty_string(merged, "tmux_session", index=index),
             state_path=_resolve_path(
                 _require_non_empty_string(merged, "state_path", index=index),
                 base_dir=path.parent,
             ),
-            tmux_window=_require_int(merged, "tmux_window", index=index),
-            tmux_pane=_require_int(merged, "tmux_pane", index=index),
             check_interval_sec=_require_int(merged, "check_interval_sec", index=index),
             progress_interval_sec=_require_int(merged, "progress_interval_sec", index=index),
             progress_capture_lines=_require_int(merged, "progress_capture_lines", index=index),
             completion_lines=_require_int(merged, "completion_lines", index=index),
             enabled=bool(merged.get("enabled", True)),
+            tmux_session=tmux_session,
+            tmux_window=_require_int(merged, "tmux_window", index=index),
+            tmux_pane=_require_int(merged, "tmux_pane", index=index),
+            terminal_target=terminal_target,
         )
 
         if route.name in seen_names:
@@ -145,6 +160,32 @@ def _resolve_tmux_bin(env: MutableMapping[str, str]) -> str:
     return "tmux"
 
 
+def _resolve_wezterm_bin(env: MutableMapping[str, str]) -> str:
+    explicit = env.get("WEZTERM_BIN", "").strip()
+    if explicit:
+        return explicit
+
+    discovered = shutil.which("wezterm")
+    if discovered:
+        return discovered
+
+    discovered = shutil.which("wezterm.exe")
+    if discovered:
+        return discovered
+
+    return "wezterm"
+
+
+def resolve_terminal_backend_name(configured: str, *, platform: str | None = None) -> str:
+    value = configured.strip().lower()
+    if value in {"tmux", "wezterm"}:
+        return value
+    if value != "auto":
+        raise ValueError(f"Unsupported TERMINAL_BACKEND: {configured}")
+    current_platform = sys.platform if platform is None else platform
+    return "wezterm" if current_platform.startswith("win") else "tmux"
+
+
 def _require_non_empty_string(payload: Mapping[str, Any], key: str, *, index: int) -> str:
     value = str(payload.get(key, "")).strip()
     if not value:
@@ -164,3 +205,30 @@ def _resolve_path(raw_path: str, *, base_dir: Path) -> Path:
     if not path.is_absolute():
         path = (base_dir / path).resolve()
     return path
+
+
+def _load_wezterm_target(payload: Mapping[str, Any], *, index: int) -> WezTermTargetConfig | None:
+    raw_target = payload.get("terminal_target")
+    if raw_target is None:
+        return None
+    if not isinstance(raw_target, dict):
+        raise ValueError(f"Bridge entry at index {index} field 'terminal_target' must be an object")
+    workspace = str(raw_target.get("workspace", "")).strip()
+    if not workspace:
+        raise ValueError(f"Bridge entry at index {index} requires non-empty 'terminal_target.workspace'")
+    pane_title = _normalize_optional_string(raw_target.get("pane_title"))
+    pane_title_regex = _normalize_optional_string(raw_target.get("pane_title_regex"))
+    cwd_contains = _normalize_optional_string(raw_target.get("cwd_contains"))
+    return WezTermTargetConfig(
+        workspace=workspace,
+        pane_title=pane_title,
+        pane_title_regex=pane_title_regex,
+        cwd_contains=cwd_contains,
+    )
+
+
+def _normalize_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
