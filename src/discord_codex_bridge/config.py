@@ -149,9 +149,11 @@ def _resolve_tmux_bin(env: MutableMapping[str, str]) -> str:
     if explicit:
         return explicit
 
-    discovered = shutil.which("tmux")
-    if discovered:
-        return discovered
+    candidates = ("psmux", "tmux", "tmux.exe", "pmux") if sys.platform.startswith("win") else ("tmux",)
+    for candidate in candidates:
+        discovered = shutil.which(candidate)
+        if discovered:
+            return discovered
 
     fallback = Path.home() / ".local/bin/tmux"
     if fallback.exists():
@@ -182,8 +184,7 @@ def resolve_terminal_backend_name(configured: str, *, platform: str | None = Non
         return value
     if value != "auto":
         raise ValueError(f"Unsupported TERMINAL_BACKEND: {configured}")
-    current_platform = sys.platform if platform is None else platform
-    return "wezterm" if current_platform.startswith("win") else "tmux"
+    return "tmux"
 
 
 def _require_non_empty_string(payload: Mapping[str, Any], key: str, *, index: int) -> str:

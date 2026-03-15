@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from discord_codex_bridge.terminal_backend import TerminalDispatchResult
 
 RUNNING_MARKER = "esc to interrupt"
 RUNNING_PROBE_LINES = 10
+PSMUX_SESSION_PATTERN = re.compile(r"^(?P<name>[^:]+): .*?(?P<attached> \(attached\))?$")
 
 
 @dataclass(frozen=True)
@@ -62,22 +64,14 @@ class TmuxBridge:
         for line in output.splitlines():
             if not line.strip():
                 continue
-            name, group, attached, last_attached = line.split("\t")
-            sessions.append(
-                SessionRef(
-                    name=name,
-                    group="" if group == name else group,
-                    attached=attached == "1",
-                    last_attached=int(last_attached or 0),
-                )
-            )
+            sessions.append(_parse_session_line(line))
         return sessions
 
     def resolve_pane_target(self, requested_session: str, window: int, pane: int) -> str:
         return resolve_target(requested_session, window, pane, self.list_sessions())
 
     def capture_tail(self, target: str, *, lines: int) -> str:
-        return self._run("capture-pane", "-pt", target, "-S", f"-{lines}")
+        return self._run("capture-pane", "-p", "-t", target, "-S", f"-{lines}")
 
     def get_pane_current_path(self, requested_session: str, window: int, pane: int) -> str:
         target = self.resolve_pane_target(requested_session, window, pane)
@@ -118,6 +112,28 @@ def _best_session(sessions: list[SessionRef]) -> SessionRef:
 
 def _format_target(session: SessionRef, window: int, pane: int) -> str:
     return f"{session.name}:{window}.{pane}"
+
+
+def _parse_session_line(line: str) -> SessionRef:
+    parts = line.split("\t")
+    if len(parts) == 4:
+        name, group, attached, last_attached = parts
+        return SessionRef(
+            name=name,
+            group="" if group == name else group,
+            attached=attached == "1",
+            last_attached=int(last_attached or 0),
+        )
+
+    match = PSMUX_SESSION_PATTERN.match(line.strip())
+    if match is None:
+        raise ValueError(f"Unable to parse tmux session line: {line}")
+    return SessionRef(
+        name=match.group("name"),
+        group="",
+        attached=bool(match.group("attached")),
+        last_attached=0,
+    )
 
 
 class TmuxTerminalBackend:

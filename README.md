@@ -9,7 +9,7 @@
 - 路由之间互不阻塞：某个会话在忙，不会卡住其它会话
 - 支持配置文件热重载；配置错误时保留 last-known-good 运行态
 - 任务完成时发送尾部输出；运行中支持中断、排队和插入消息
-- Linux 默认使用 `tmux`，Windows 默认使用 `WezTerm`
+- Linux 默认使用 `tmux`，Windows 默认使用 `psmux` 兼容的 `tmux` 命令
 
 ## Runtime Shortcuts
 
@@ -70,7 +70,7 @@ p 60 200
 
 - Python 3.10+
 - Linux: `tmux`
-- Windows: `WezTerm`
+- Windows: `psmux`（推荐）或 `WezTerm`（兼容模式）
 - 已加入服务器的 Discord bot
 - 为 bot 开启 Discord `MESSAGE CONTENT INTENT`
 - 每条路由目标终端中已经有一个可交互的 Codex TUI
@@ -80,9 +80,9 @@ p 60 200
 
 第一期跨平台支持采用**单进程单 backend**：
 
-- `TERMINAL_BACKEND=auto`：Linux 选 `tmux`，Windows 选 `wezterm`
-- `TERMINAL_BACKEND=tmux`：显式使用 `tmux`
-- `TERMINAL_BACKEND=wezterm`：显式使用 `WezTerm`
+- `TERMINAL_BACKEND=auto`：Linux / Windows 都选 `tmux`
+- `TERMINAL_BACKEND=tmux`：显式使用 `tmux` 兼容 backend；Windows 推荐配合 `psmux`
+- `TERMINAL_BACKEND=wezterm`：显式使用 `WezTerm` 兼容旧配置
 
 当前**不支持**同一个 bridge 进程里部分路由走 `tmux`、部分路由走 `WezTerm`。
 
@@ -111,8 +111,8 @@ COMPLETION_LINES=100
 - `DISCORD_BOT_TOKEN` 只放在本地 `.env`，不要提交到仓库
 - `BRIDGES_CONFIG_PATH` 指向本地多路由 JSON 配置
 - `TERMINAL_BACKEND` 默认为 `auto`
-- `TMUX_BIN` 建议在 Linux 上写绝对路径，方便在 `systemd --user` 下运行
-- `WEZTERM_BIN` 默认为 `wezterm`
+- `TMUX_BIN` 在 Linux 上建议写绝对路径；在 Windows 上可以显式写成 `psmux`
+- `WEZTERM_BIN` 仅在 `TERMINAL_BACKEND=wezterm` 时需要
 - `TMUX_WINDOW`、`TMUX_PANE`、轮询/进度参数是全局默认值；只有 `tmux` backend 会用到前两个字段
 
 ### 2. Route Settings In `bridges.local.json`
@@ -135,7 +135,7 @@ COMPLETION_LINES=100
 }
 ```
 
-### Windows / WezTerm Route Example
+### Windows / psmux Route Example
 
 ```json
 {
@@ -144,18 +144,14 @@ COMPLETION_LINES=100
       "name": "windows-dev",
       "enabled": true,
       "channel_id": 234567890123456789,
-      "terminal_target": {
-        "workspace": "codex",
-        "pane_title_regex": "^codex: windows-dev$",
-        "cwd_contains": "projectHome"
-      },
+      "tmux_session": "codex",
       "state_path": "./state/bridge_state_windows_dev.json"
     }
   ]
 }
 ```
 
-`bridges.example.json` 同时展示了两种目标形状。运行时请只保留与你当前 `TERMINAL_BACKEND` 对应的那类路由。
+`bridges.example.json` 默认展示推荐的 `tmux` / `psmux` 形状。只有在你显式选择 `TERMINAL_BACKEND=wezterm` 时，才需要 `terminal_target` 这一类字段。
 
 字段说明：
 
@@ -189,31 +185,36 @@ WezTerm selector 解析顺序：
 
 ## Minimal Windows Use Case
 
-下面是一条最小可跑通的 Windows 用法，目标是把一个 Discord 频道桥接到一个本地 `codex` pane。
+下面是一条最小可跑通的 Windows 用法，目标是把一个 Discord 频道桥接到一个本地 `psmux` 会话里的 `codex`。
 
-1. 先拉起一个专用 WezTerm 窗口：
+1. 安装 `psmux`：
 
 ```powershell
-D:\Program\wezterm.exe start --workspace codex --cwd E:\projectHome\discord-codex-bridge pwsh.exe
+winget install --id marlocarlo.psmux
 ```
 
-2. 在新开的 PowerShell pane 里执行：
+2. 新开一个 PowerShell 或 `cmd` 窗口，启动或复用 `codex` 会话：
 
 ```powershell
-$Host.UI.RawUI.WindowTitle = 'codex: windows-dev'
+tmux new-session -A -s codex
+```
+
+3. 在这个 `tmux` / `psmux` 会话里执行：
+
+```powershell
 codex
 ```
 
-3. 本地 `.env` 最小示例：
+4. 本地 `.env` 最小示例：
 
 ```env
 DISCORD_BOT_TOKEN=your_bot_token
 BRIDGES_CONFIG_PATH=./bridges.local.json
-TERMINAL_BACKEND=wezterm
-WEZTERM_BIN=D:\Program\wezterm.exe
+TERMINAL_BACKEND=tmux
+TMUX_BIN=psmux
 ```
 
-4. 本地 `bridges.local.json` 最小示例：
+5. 本地 `bridges.local.json` 最小示例：
 
 ```json
 {
@@ -222,28 +223,26 @@ WEZTERM_BIN=D:\Program\wezterm.exe
       "name": "windows-dev",
       "enabled": true,
       "channel_id": 234567890123456789,
-      "terminal_target": {
-        "workspace": "codex",
-        "pane_title": "codex: windows-dev",
-        "cwd_contains": "discord-codex-bridge"
-      },
+      "tmux_session": "codex",
       "state_path": "./state/bridge_state_windows_dev.json"
     }
   ]
 }
 ```
 
-5. 在仓库目录启动 bridge：
+6. 在仓库目录启动 bridge：
 
 ```powershell
 python -m discord_codex_bridge --env-file .env
 ```
 
-6. 往绑定的 Discord 频道发一条普通消息，bridge 会把文本注入到标题为 `codex: windows-dev` 的 WezTerm pane。运行中还可以用：
+7. 往绑定的 Discord 频道发一条普通消息，bridge 会把文本注入到 `codex` 这个 `psmux` 会话。运行中还可以用：
 
 - `f` 抓当前 pane 尾部输出
 - `e` 发送 `Esc`
 - `i <text>` 立即插入文本
+
+如果你已经在用旧的 `WezTerm` 方案，仍然可以显式设置 `TERMINAL_BACKEND=wezterm` 并继续使用 `terminal_target`。
 
 ## Privacy And Git Hygiene
 
@@ -259,7 +258,7 @@ python -m discord_codex_bridge --env-file .env
 - `.env.example`
 - `bridges.example.json`
 
-这意味着可以安全提交配置结构、字段说明和占位示例，但**不要**提交真实 token、真实频道 ID、真实 tmux session 名、真实 WezTerm selector 或真实状态文件路径。
+这意味着可以安全提交配置结构、字段说明和占位示例，但**不要**提交真实 token、真实频道 ID、真实 tmux session 名、真实 terminal selector 或真实状态文件路径。
 
 ## Hot Reload
 

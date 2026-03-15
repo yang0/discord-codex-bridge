@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import discord_codex_bridge.config as config_module
 from discord_codex_bridge.ai import build_responses_api_url, load_codex_model_config
 from discord_codex_bridge.backend_factory import create_terminal_backend
 from discord_codex_bridge.config import (
@@ -79,8 +80,8 @@ def test_resolve_terminal_backend_name_uses_tmux_for_linux():
     assert resolve_terminal_backend_name('auto', platform='linux') == 'tmux'
 
 
-def test_resolve_terminal_backend_name_uses_wezterm_for_windows():
-    assert resolve_terminal_backend_name('auto', platform='win32') == 'wezterm'
+def test_resolve_terminal_backend_name_uses_tmux_for_windows():
+    assert resolve_terminal_backend_name('auto', platform='win32') == 'tmux'
 
 
 def test_resolve_terminal_backend_name_preserves_explicit_value():
@@ -100,7 +101,7 @@ def test_create_terminal_backend_uses_tmux_for_linux_auto(tmp_path: Path):
     assert isinstance(backend, TmuxTerminalBackend)
 
 
-def test_create_terminal_backend_uses_wezterm_for_windows_auto(tmp_path: Path):
+def test_create_terminal_backend_uses_tmux_for_windows_auto(tmp_path: Path):
     settings = Settings.from_env(
         {
             'DISCORD_BOT_TOKEN': 'token',
@@ -110,7 +111,30 @@ def test_create_terminal_backend_uses_wezterm_for_windows_auto(tmp_path: Path):
 
     backend = create_terminal_backend(settings, platform='win32')
 
-    assert isinstance(backend, WezTermBackend)
+    assert isinstance(backend, TmuxTerminalBackend)
+
+
+def test_settings_prefers_psmux_bin_on_windows_when_available(tmp_path: Path, monkeypatch):
+    def fake_which(name: str) -> str | None:
+        mapping = {
+            'psmux': 'C:/Users/test/AppData/Local/Microsoft/WinGet/Links/psmux.exe',
+            'tmux': 'C:/Users/test/AppData/Local/Microsoft/WinGet/Links/tmux.exe',
+            'tmux.exe': 'C:/Users/test/AppData/Local/Microsoft/WinGet/Links/tmux.exe',
+            'pmux': 'C:/Users/test/AppData/Local/Microsoft/WinGet/Links/pmux.exe',
+        }
+        return mapping.get(name)
+
+    monkeypatch.setattr(config_module.shutil, 'which', fake_which)
+    monkeypatch.setattr(config_module.sys, 'platform', 'win32', raising=False)
+
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+        },
+        base_dir=tmp_path,
+    )
+
+    assert settings.tmux_bin == 'C:/Users/test/AppData/Local/Microsoft/WinGet/Links/psmux.exe'
 
 
 def test_create_terminal_backend_respects_explicit_backend(tmp_path: Path):

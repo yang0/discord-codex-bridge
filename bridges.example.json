@@ -19,11 +19,7 @@
       "name": "windows-dev",
       "enabled": false,
       "channel_id": 234567890123456789,
-      "terminal_target": {
-        "workspace": "codex",
-        "pane_title_regex": "^codex: windows-dev$",
-        "cwd_contains": "projectHome"
-      },
+      "tmux_session": "codex",
       "state_path": "./state/bridge_state_windows_dev.json"
     }
   ]
