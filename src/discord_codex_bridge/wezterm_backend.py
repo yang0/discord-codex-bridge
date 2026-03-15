@@ -94,7 +94,10 @@ class WezTermBackend:
         return panes
 
     def _run(self, *args: str) -> str:
-        return self.runner([self.wezterm_bin, *args])
+        command = [self.wezterm_bin, *args]
+        if args and args[0] == "cli" and "--prefer-mux" not in args[1:]:
+            command = [self.wezterm_bin, "cli", "--prefer-mux", *args[1:]]
+        return self.runner(command)
 
     def _run_subprocess(self, args: list[str]) -> str:
         completed = subprocess.run(

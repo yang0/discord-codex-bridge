@@ -187,6 +187,64 @@ WezTerm selector 解析顺序：
 - `state_path` 建议每条路由单独一个文件，避免状态互相污染
 - `bridges.example.json` 只放占位值，真实频道/会话名只写入本地 `bridges.local.json`
 
+## Minimal Windows Use Case
+
+下面是一条最小可跑通的 Windows 用法，目标是把一个 Discord 频道桥接到一个本地 `codex` pane。
+
+1. 先拉起一个专用 WezTerm 窗口：
+
+```powershell
+D:\Program\wezterm.exe start --workspace codex --cwd E:\projectHome\discord-codex-bridge pwsh.exe
+```
+
+2. 在新开的 PowerShell pane 里执行：
+
+```powershell
+$Host.UI.RawUI.WindowTitle = 'codex: windows-dev'
+codex
+```
+
+3. 本地 `.env` 最小示例：
+
+```env
+DISCORD_BOT_TOKEN=your_bot_token
+BRIDGES_CONFIG_PATH=./bridges.local.json
+TERMINAL_BACKEND=wezterm
+WEZTERM_BIN=D:\Program\wezterm.exe
+```
+
+4. 本地 `bridges.local.json` 最小示例：
+
+```json
+{
+  "bridges": [
+    {
+      "name": "windows-dev",
+      "enabled": true,
+      "channel_id": 234567890123456789,
+      "terminal_target": {
+        "workspace": "codex",
+        "pane_title": "codex: windows-dev",
+        "cwd_contains": "discord-codex-bridge"
+      },
+      "state_path": "./state/bridge_state_windows_dev.json"
+    }
+  ]
+}
+```
+
+5. 在仓库目录启动 bridge：
+
+```powershell
+python -m discord_codex_bridge --env-file .env
+```
+
+6. 往绑定的 Discord 频道发一条普通消息，bridge 会把文本注入到标题为 `codex: windows-dev` 的 WezTerm pane。运行中还可以用：
+
+- `f` 抓当前 pane 尾部输出
+- `e` 发送 `Esc`
+- `i <text>` 立即插入文本
+
 ## Privacy And Git Hygiene
 
 以下内容默认应只存在本地，不进入仓库：

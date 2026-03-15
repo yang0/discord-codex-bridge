@@ -60,7 +60,7 @@ def test_resolve_target_uses_workspace_and_exact_title(tmp_path: Path):
     target = backend.resolve_target(make_route(tmp_path, pane_title='codex: windows-dev'))
 
     assert target == '42'
-    assert runner.calls == [['wezterm', 'cli', 'list', '--format', 'json']]
+    assert runner.calls == [['wezterm', 'cli', '--prefer-mux', 'list', '--format', 'json']]
 
 
 def test_resolve_target_supports_title_regex(tmp_path: Path):
@@ -143,7 +143,7 @@ def test_capture_tail_uses_get_text_command(tmp_path: Path):
     tail = backend.capture_tail('42', lines=100)
 
     assert tail == 'tail output'
-    assert runner.calls == [['wezterm', 'cli', 'get-text', '--pane-id', '42', '--start-line', '-100']]
+    assert runner.calls == [['wezterm', 'cli', '--prefer-mux', 'get-text', '--pane-id', '42', '--start-line', '-100']]
 
 
 def test_send_message_uses_send_text_and_returns_latest_tail(tmp_path: Path):
@@ -168,9 +168,9 @@ def test_send_message_uses_send_text_and_returns_latest_tail(tmp_path: Path):
     assert result.target == '42'
     assert result.running is True
     assert runner.calls == [
-        ['wezterm', 'cli', 'list', '--format', 'json'],
-        ['wezterm', 'cli', 'send-text', '--pane-id', '42', '--no-paste', 'refine it\n'],
-        ['wezterm', 'cli', 'get-text', '--pane-id', '42', '--start-line', '-20'],
+        ['wezterm', 'cli', '--prefer-mux', 'list', '--format', 'json'],
+        ['wezterm', 'cli', '--prefer-mux', 'send-text', '--pane-id', '42', '--no-paste', 'refine it\n'],
+        ['wezterm', 'cli', '--prefer-mux', 'get-text', '--pane-id', '42', '--start-line', '-20'],
     ]
 
 
@@ -196,7 +196,7 @@ def test_send_interrupt_sends_escape_character_without_paste(tmp_path: Path):
     assert result.target == '42'
     assert result.running is False
     assert runner.calls == [
-        ['wezterm', 'cli', 'list', '--format', 'json'],
-        ['wezterm', 'cli', 'send-text', '--pane-id', '42', '--no-paste', '\x1b'],
-        ['wezterm', 'cli', 'get-text', '--pane-id', '42', '--start-line', '-20'],
+        ['wezterm', 'cli', '--prefer-mux', 'list', '--format', 'json'],
+        ['wezterm', 'cli', '--prefer-mux', 'send-text', '--pane-id', '42', '--no-paste', '\x1b'],
+        ['wezterm', 'cli', '--prefer-mux', 'get-text', '--pane-id', '42', '--start-line', '-20'],
     ]
