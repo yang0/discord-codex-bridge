@@ -65,7 +65,8 @@ from discord_codex_bridge.shortcuts import (
 )
 from discord_codex_bridge.state import JsonStateStore
 from discord_codex_bridge.summary import format_completion, split_discord_message, summarize_progress
-from discord_codex_bridge.tmux_bridge import RUNNING_MARKER, RUNNING_PROBE_LINES, TmuxBridge, pane_indicates_running
+from discord_codex_bridge.terminal_backend import TerminalBackend
+from discord_codex_bridge.tmux_bridge import RUNNING_MARKER, RUNNING_PROBE_LINES, TmuxBridge, TmuxTerminalBackend, pane_indicates_running
 
 
 LOGGER = logging.getLogger(__name__)
@@ -104,6 +105,7 @@ class DiscordCodexBridge(discord.Client):
         settings: Settings,
         *,
         routes: list[BridgeRouteConfig] | None = None,
+        terminal_backend: TerminalBackend | None = None,
         tmux_bridge: TmuxBridge | None = None,
         route_loader: Callable[[Settings], list[BridgeRouteConfig]] = load_bridge_routes,
         ai_runner: AiCommandRunner | None = None,
@@ -115,7 +117,10 @@ class DiscordCodexBridge(discord.Client):
         super().__init__(intents=intents)
 
         self.settings = settings
-        self.tmux = tmux_bridge or TmuxBridge(tmux_bin=settings.tmux_bin)
+        self.terminal = terminal_backend or TmuxTerminalBackend(
+            tmux_bin=settings.tmux_bin,
+            tmux=tmux_bridge,
+        )
         self.route_loader = route_loader
         self.ai_runner = ai_runner or AiCommandRunner()
         self.monitor_task: asyncio.Task[None] | None = None
@@ -310,6 +315,7 @@ class DiscordCodexBridge(discord.Client):
             or current.tmux_session != incoming.tmux_session
             or current.tmux_window != incoming.tmux_window
             or current.tmux_pane != incoming.tmux_pane
+            or current.terminal_target != incoming.terminal_target
             or current.state_path != incoming.state_path
         )
 
@@ -370,12 +376,10 @@ class DiscordCodexBridge(discord.Client):
             return
 
         target = await asyncio.to_thread(
-            self.tmux.resolve_pane_target,
-            runtime.route.tmux_session,
-            runtime.route.tmux_window,
-            runtime.route.tmux_pane,
+            self.terminal.resolve_target,
+            runtime.route,
         )
-        probe = await asyncio.to_thread(self.tmux.capture_tail, target, lines=RUNNING_PROBE_LINES)
+        probe = await asyncio.to_thread(self.terminal.capture_tail, target, lines=RUNNING_PROBE_LINES)
         running = pane_indicates_running(probe)
 
         if running:
@@ -383,7 +387,7 @@ class DiscordCodexBridge(discord.Client):
             progress_summary = ""
             if self._progress_due(runtime, now):
                 progress_text = await asyncio.to_thread(
-                    self.tmux.capture_tail,
+                    self.terminal.capture_tail,
                     target,
                     lines=self._runtime_progress_capture_lines(runtime),
                 )
@@ -395,7 +399,7 @@ class DiscordCodexBridge(discord.Client):
             return
 
         completion_text = await asyncio.to_thread(
-            self.tmux.capture_tail,
+            self.terminal.capture_tail,
             target,
             lines=runtime.route.completion_lines,
         )
@@ -446,14 +450,12 @@ class DiscordCodexBridge(discord.Client):
             if effect.kind == "dispatch" and effect.request is not None:
                 try:
                     await asyncio.to_thread(
-                        self.tmux.send_message,
-                        runtime.route.tmux_session,
-                        runtime.route.tmux_window,
-                        runtime.route.tmux_pane,
+                        self.terminal.send_message,
+                        runtime.route,
                         effect.request.content,
                     )
                 except Exception as exc:
-                    LOGGER.exception("dispatch to tmux failed")
+                    LOGGER.exception("dispatch to terminal backend failed")
                     runtime.controller.rollback_failed_dispatch(effect.request.request_id)
                     runtime.state_store.save(runtime.controller.state)
                     suppress_followup_message = True
@@ -461,7 +463,7 @@ class DiscordCodexBridge(discord.Client):
                         runtime.last_dispatch_error_at = _utcnow()
                         await self._send_runtime_message(
                             runtime,
-                            f"转发到 tmux 失败，消息暂存未送达：{type(exc).__name__}: {exc}",
+                            f"转发到终端会话失败，消息暂存未送达：{type(exc).__name__}: {exc}",
                         )
             elif effect.kind == "discord_message":
                 if suppress_followup_message:
@@ -611,18 +613,13 @@ class DiscordCodexBridge(discord.Client):
             return snapshot
 
     async def _resolve_workspace_root(self, *, runtime: BridgeRuntime) -> Path | None:
-        get_pane_current_path = getattr(self.tmux, "get_pane_current_path", None)
-        if not callable(get_pane_current_path):
-            return None
         try:
             raw_path = await asyncio.to_thread(
-                get_pane_current_path,
-                runtime.route.tmux_session,
-                runtime.route.tmux_window,
-                runtime.route.tmux_pane,
+                self.terminal.get_current_path,
+                runtime.route,
             )
         except Exception:
-            LOGGER.exception("failed to resolve tmux workspace root for ai command")
+            LOGGER.exception("failed to resolve terminal workspace root for ai command")
             return None
 
         value = str(raw_path).strip()
@@ -635,12 +632,10 @@ class DiscordCodexBridge(discord.Client):
 
     async def _capture_runtime_snapshot(self, *, runtime: BridgeRuntime, lines: int) -> RuntimeSnapshot:
         target = await asyncio.to_thread(
-            self.tmux.resolve_pane_target,
-            runtime.route.tmux_session,
-            runtime.route.tmux_window,
-            runtime.route.tmux_pane,
+            self.terminal.resolve_target,
+            runtime.route,
         )
-        latest_output = await asyncio.to_thread(self.tmux.capture_tail, target, lines=lines)
+        latest_output = await asyncio.to_thread(self.terminal.capture_tail, target, lines=lines)
         return RuntimeSnapshot(
             target=target,
             latest_output=latest_output,
@@ -724,10 +719,8 @@ class DiscordCodexBridge(discord.Client):
 
         if command and command.name == "esc":
             await asyncio.to_thread(
-                self.tmux.send_escape,
-                runtime.route.tmux_session,
-                runtime.route.tmux_window,
-                runtime.route.tmux_pane,
+                self.terminal.send_interrupt,
+                runtime.route,
             )
             await self._send_runtime_message(runtime, "已发送 Escape，中断当前 Codex。")
             return
@@ -755,10 +748,8 @@ class DiscordCodexBridge(discord.Client):
                 await self._send_runtime_message(runtime, "用法：`i <text>`")
                 return
             await asyncio.to_thread(
-                self.tmux.send_message,
-                runtime.route.tmux_session,
-                runtime.route.tmux_window,
-                runtime.route.tmux_pane,
+                self.terminal.send_message,
+                runtime.route,
                 command.argument,
             )
             await self._send_runtime_message(runtime, "已插入到运行中的 Codex。")

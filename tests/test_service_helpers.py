@@ -11,14 +11,24 @@ from discord_codex_bridge.service import (
     runtime_output_indicates_running,
     should_treat_task_as_completed,
 )
+from discord_codex_bridge.terminal_backend import TerminalDispatchResult
 
 
-class FakeTmux:
-    def send_message(self, requested_session: str, window: int, pane: int, message: str):
-        return None
+class FakeTerminalBackend:
+    def resolve_target(self, route) -> str:
+        return f'{route.name}-target'
 
-    def send_escape(self, requested_session: str, window: int, pane: int):
-        return None
+    def capture_tail(self, target: str, *, lines: int) -> str:
+        return 'done'
+
+    def send_message(self, route, message: str) -> TerminalDispatchResult:
+        return TerminalDispatchResult(target=self.resolve_target(route), tail='done', running=False)
+
+    def send_interrupt(self, route) -> TerminalDispatchResult:
+        return TerminalDispatchResult(target=self.resolve_target(route), tail='done', running=False)
+
+    def get_current_path(self, route) -> str:
+        return str(Path.cwd())
 
 
 def make_settings(tmp_path: Path, route_file: Path | None = None) -> Settings:
@@ -113,7 +123,7 @@ def test_hot_reload_adds_new_route_without_dropping_running_route(tmp_path: Path
         ],
     )
     settings = make_settings(tmp_path, route_file=route_file)
-    bridge = DiscordCodexBridge(settings, tmux_bridge=FakeTmux(), route_loader=load_bridge_routes)
+    bridge = DiscordCodexBridge(settings, terminal_backend=FakeTerminalBackend(), route_loader=load_bridge_routes)
 
     alpha_runtime = bridge.route_runtime(111)
     assert alpha_runtime is not None
@@ -161,7 +171,7 @@ def test_hot_reload_keeps_last_known_good_routes_when_config_is_invalid(tmp_path
         ],
     )
     settings = make_settings(tmp_path, route_file=route_file)
-    bridge = DiscordCodexBridge(settings, tmux_bridge=FakeTmux(), route_loader=load_bridge_routes)
+    bridge = DiscordCodexBridge(settings, terminal_backend=FakeTerminalBackend(), route_loader=load_bridge_routes)
 
     route_file.write_text('{not valid json')
     changed = asyncio.run(bridge.reload_if_config_changed(force=True))
@@ -186,7 +196,7 @@ def test_removed_route_becomes_draining_when_active(tmp_path: Path):
         ],
     )
     settings = make_settings(tmp_path, route_file=route_file)
-    bridge = DiscordCodexBridge(settings, tmux_bridge=FakeTmux(), route_loader=load_bridge_routes)
+    bridge = DiscordCodexBridge(settings, terminal_backend=FakeTerminalBackend(), route_loader=load_bridge_routes)
 
     alpha_runtime = bridge.route_runtime(111)
     assert alpha_runtime is not None
@@ -215,7 +225,7 @@ def test_reconcile_waits_for_non_running_output_to_stabilize_before_completion(t
         ],
     )
     settings = make_settings(tmp_path, route_file=route_file)
-    bridge = DiscordCodexBridge(settings, tmux_bridge=FakeTmux(), route_loader=load_bridge_routes)
+    bridge = DiscordCodexBridge(settings, terminal_backend=FakeTerminalBackend(), route_loader=load_bridge_routes)
     runtime = bridge.route_runtime(111)
     assert runtime is not None
     active = make_active(111, 'alpha-active')
@@ -273,7 +283,7 @@ def test_progress_setting_overrides_are_restored_after_restart(tmp_path: Path):
         ],
     )
     settings = make_settings(tmp_path, route_file=route_file)
-    bridge = DiscordCodexBridge(settings, tmux_bridge=FakeTmux(), route_loader=load_bridge_routes)
+    bridge = DiscordCodexBridge(settings, terminal_backend=FakeTerminalBackend(), route_loader=load_bridge_routes)
     runtime = bridge.route_runtime(111)
     assert runtime is not None
     runtime.controller.state.progress_interval_sec_override = 60
@@ -281,7 +291,7 @@ def test_progress_setting_overrides_are_restored_after_restart(tmp_path: Path):
     runtime.controller.progress_interval_sec = 60
     runtime.state_store.save(runtime.controller.state)
 
-    restarted = DiscordCodexBridge(settings, tmux_bridge=FakeTmux(), route_loader=load_bridge_routes)
+    restarted = DiscordCodexBridge(settings, terminal_backend=FakeTerminalBackend(), route_loader=load_bridge_routes)
     restarted_runtime = restarted.route_runtime(111)
     assert restarted_runtime is not None
 

@@ -4,6 +4,9 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+from discord_codex_bridge.models import BridgeRouteConfig
+from discord_codex_bridge.terminal_backend import TerminalDispatchResult
+
 
 RUNNING_MARKER = "esc to interrupt"
 RUNNING_PROBE_LINES = 10
@@ -115,3 +118,25 @@ def _best_session(sessions: list[SessionRef]) -> SessionRef:
 
 def _format_target(session: SessionRef, window: int, pane: int) -> str:
     return f"{session.name}:{window}.{pane}"
+
+
+class TmuxTerminalBackend:
+    def __init__(self, *, tmux_bin: str = "tmux", tmux: TmuxBridge | None = None) -> None:
+        self.tmux = tmux or TmuxBridge(tmux_bin=tmux_bin)
+
+    def resolve_target(self, route: BridgeRouteConfig) -> str:
+        return self.tmux.resolve_pane_target(route.tmux_session, route.tmux_window, route.tmux_pane)
+
+    def capture_tail(self, target: str, *, lines: int) -> str:
+        return self.tmux.capture_tail(target, lines=lines)
+
+    def send_message(self, route: BridgeRouteConfig, message: str) -> TerminalDispatchResult:
+        result = self.tmux.send_message(route.tmux_session, route.tmux_window, route.tmux_pane, message)
+        return TerminalDispatchResult(target=result.target, tail=result.tail, running=result.running)
+
+    def send_interrupt(self, route: BridgeRouteConfig) -> TerminalDispatchResult:
+        result = self.tmux.send_escape(route.tmux_session, route.tmux_window, route.tmux_pane)
+        return TerminalDispatchResult(target=result.target, tail=result.tail, running=result.running)
+
+    def get_current_path(self, route: BridgeRouteConfig) -> str:
+        return self.tmux.get_pane_current_path(route.tmux_session, route.tmux_window, route.tmux_pane)

@@ -8,23 +8,31 @@ from discord_codex_bridge.config import Settings
 from discord_codex_bridge.models import BridgeRouteConfig, DiscordRequest
 from discord_codex_bridge.service import DiscordCodexBridge, RuntimeSnapshot
 from discord_codex_bridge.shortcuts import ShortcutCommand
+from discord_codex_bridge.terminal_backend import TerminalDispatchResult
 
 
-class FakeTmux:
-    def __init__(self) -> None:
-        self.sent_messages: list[tuple[str, int, int, str]] = []
-        self.escape_calls: list[tuple[str, int, int]] = []
-        self.current_path = '/tmp/workspace'
+class FakeTerminalBackend:
+    def __init__(self, *, current_path: str | None = None) -> None:
+        self.sent_messages: list[tuple[str, str]] = []
+        self.interrupt_calls: list[str] = []
+        self.current_path = current_path or str(Path.cwd())
+        self.latest_tail = 'working... esc to interrupt'
 
-    def send_message(self, requested_session: str, window: int, pane: int, message: str):
-        self.sent_messages.append((requested_session, window, pane, message))
-        return None
+    def resolve_target(self, route: BridgeRouteConfig) -> str:
+        return f'{route.name}-target'
 
-    def send_escape(self, requested_session: str, window: int, pane: int):
-        self.escape_calls.append((requested_session, window, pane))
-        return None
+    def capture_tail(self, target: str, *, lines: int) -> str:
+        return self.latest_tail
 
-    def get_pane_current_path(self, requested_session: str, window: int, pane: int) -> str:
+    def send_message(self, route: BridgeRouteConfig, message: str) -> TerminalDispatchResult:
+        self.sent_messages.append((route.name, message))
+        return TerminalDispatchResult(target=self.resolve_target(route), tail=self.latest_tail, running=True)
+
+    def send_interrupt(self, route: BridgeRouteConfig) -> TerminalDispatchResult:
+        self.interrupt_calls.append(route.name)
+        return TerminalDispatchResult(target=self.resolve_target(route), tail=self.latest_tail, running=False)
+
+    def get_current_path(self, route: BridgeRouteConfig) -> str:
         return self.current_path
 
 
@@ -71,13 +79,13 @@ def make_bridge(
     tmp_path: Path,
     *,
     routes: list[BridgeRouteConfig] | None = None,
-    tmux: FakeTmux | None = None,
+    terminal_backend: FakeTerminalBackend | None = None,
     ai_runner: FakeAiRunner | None = None,
 ) -> DiscordCodexBridge:
     return DiscordCodexBridge(
         make_settings(tmp_path),
         routes=routes or [make_route(tmp_path)],
-        tmux_bridge=tmux or FakeTmux(),
+        terminal_backend=terminal_backend or FakeTerminalBackend(),
         ai_runner=ai_runner,
     )
 
@@ -155,8 +163,8 @@ def test_running_queue_command_enqueues_without_dispatch(tmp_path: Path):
 
 
 def test_running_i_command_sends_message_immediately(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -178,13 +186,13 @@ def test_running_i_command_sends_message_immediately(tmp_path: Path):
         )
     )
 
-    assert tmux.sent_messages == [('session_alpha', 0, 0, 'refine it')]
+    assert terminal_backend.sent_messages == [('alpha', 'refine it')]
     assert '已插入到运行中的 Codex' in messages[0]
 
 
 def test_help_command_returns_shortcut_document_when_idle(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -196,7 +204,7 @@ def test_help_command_returns_shortcut_document_when_idle(tmp_path: Path):
 
     asyncio.run(bridge.on_message(make_message('h')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.state.active is None
     assert runtime.controller.state.queue == []
     assert len(messages) == 1
@@ -206,8 +214,8 @@ def test_help_command_returns_shortcut_document_when_idle(tmp_path: Path):
 
 
 def test_help_command_returns_shortcut_document_when_busy(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     now = datetime.now(timezone.utc)
@@ -231,7 +239,7 @@ def test_help_command_returns_shortcut_document_when_busy(tmp_path: Path):
 
     asyncio.run(bridge.on_message(make_message('h')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.state.active is not None
     assert runtime.controller.state.active.request_id == 'running-task'
     assert len(messages) == 1
@@ -321,9 +329,11 @@ def test_busy_route_does_not_block_other_route(tmp_path: Path):
 
 
 def test_ai_command_uses_ai_runner_instead_of_tmux_when_idle(tmp_path: Path):
-    tmux = FakeTmux()
+    workspace_root = tmp_path / 'workspace'
+    workspace_root.mkdir()
+    terminal_backend = FakeTerminalBackend(current_path=str(workspace_root))
     ai_runner = FakeAiRunner(reply='file content here')
-    bridge = make_bridge(tmp_path, tmux=tmux, ai_runner=ai_runner)
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend, ai_runner=ai_runner)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -343,20 +353,20 @@ def test_ai_command_uses_ai_runner_instead_of_tmux_when_idle(tmp_path: Path):
 
     asyncio.run(bridge.on_message(make_message('ai 把这个文件发我')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.state.active is None
     assert runtime.controller.state.queue == []
     assert messages == ['file content here']
     assert len(ai_runner.calls) == 1
     assert ai_runner.calls[0].instruction == '把这个文件发我'
-    assert ai_runner.calls[0].workspace_root == Path('/tmp/workspace')
+    assert ai_runner.calls[0].workspace_root == workspace_root.resolve()
     assert ai_runner.calls[0].latest_output == 'latest output'
 
 
 def test_ai_command_bypasses_busy_tmux_state(tmp_path: Path):
-    tmux = FakeTmux()
+    terminal_backend = FakeTerminalBackend()
     ai_runner = FakeAiRunner(reply='ai handled it')
-    bridge = make_bridge(tmp_path, tmux=tmux, ai_runner=ai_runner)
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend, ai_runner=ai_runner)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     now = datetime.now(timezone.utc)
@@ -388,7 +398,7 @@ def test_ai_command_bypasses_busy_tmux_state(tmp_path: Path):
 
     asyncio.run(bridge.on_message(make_message('ai 把这个文件发我')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.state.active is not None
     assert runtime.controller.state.active.request_id == 'running-task'
     assert messages == ['ai handled it']
@@ -397,8 +407,8 @@ def test_ai_command_bypasses_busy_tmux_state(tmp_path: Path):
 
 
 def test_fetch_command_returns_last_100_lines_by_default(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -417,7 +427,7 @@ def test_fetch_command_returns_last_100_lines_by_default(tmp_path: Path):
     asyncio.run(bridge.on_message(make_message('f')))
 
     assert requested_lines == [100]
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.state.active is None
     assert runtime.controller.state.queue == []
     assert messages == ['tail output']
@@ -482,8 +492,8 @@ def test_fetch_command_bypasses_busy_tmux_state(tmp_path: Path):
 
 
 def test_fetch_command_rejects_invalid_line_count(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -495,15 +505,15 @@ def test_fetch_command_rejects_invalid_line_count(tmp_path: Path):
 
     asyncio.run(bridge.on_message(make_message('f nope')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.state.active is None
     assert runtime.controller.state.queue == []
     assert messages == ['用法：`f [lines]`，其中 `lines` 必须是正整数。']
 
 
 def test_progress_settings_command_reports_current_route_settings(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -515,13 +525,13 @@ def test_progress_settings_command_reports_current_route_settings(tmp_path: Path
 
     asyncio.run(bridge.on_message(make_message('p')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert messages == ['当前自动抓取：每 300 秒，抓取 220 行。']
 
 
 def test_progress_settings_command_updates_runtime_and_state(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -533,7 +543,7 @@ def test_progress_settings_command_updates_runtime_and_state(tmp_path: Path):
 
     asyncio.run(bridge.on_message(make_message('p 60 200')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.progress_interval_sec == 60
     assert runtime.controller.state.progress_interval_sec_override == 60
     assert runtime.controller.state.progress_capture_lines_override == 200
@@ -541,8 +551,8 @@ def test_progress_settings_command_updates_runtime_and_state(tmp_path: Path):
 
 
 def test_progress_settings_command_rejects_invalid_values(tmp_path: Path):
-    tmux = FakeTmux()
-    bridge = make_bridge(tmp_path, tmux=tmux)
+    terminal_backend = FakeTerminalBackend()
+    bridge = make_bridge(tmp_path, terminal_backend=terminal_backend)
     runtime = bridge.route_runtime(123)
     assert runtime is not None
     messages: list[str] = []
@@ -554,7 +564,7 @@ def test_progress_settings_command_rejects_invalid_values(tmp_path: Path):
 
     asyncio.run(bridge.on_message(make_message('p 1 10')))
 
-    assert tmux.sent_messages == []
+    assert terminal_backend.sent_messages == []
     assert runtime.controller.progress_interval_sec == 300
     assert runtime.controller.state.progress_interval_sec_override is None
     assert runtime.controller.state.progress_capture_lines_override is None
