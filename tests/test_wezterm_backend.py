@@ -43,13 +43,13 @@ def test_resolve_target_uses_workspace_and_exact_title(tmp_path: Path):
                 {
                     'pane_id': 41,
                     'workspace': 'codex',
-                    'title': 'Codex: other',
+                    'title': 'codex: other',
                     'cwd': 'file:///Users/test/other',
                 },
                 {
                     'pane_id': 42,
                     'workspace': 'codex',
-                    'title': 'Codex: windows-dev',
+                    'title': 'codex: windows-dev',
                     'cwd': 'file:///Users/test/project',
                 },
             )
@@ -57,7 +57,7 @@ def test_resolve_target_uses_workspace_and_exact_title(tmp_path: Path):
     )
     backend = WezTermBackend(wezterm_bin='wezterm', runner=runner)
 
-    target = backend.resolve_target(make_route(tmp_path, pane_title='Codex: windows-dev'))
+    target = backend.resolve_target(make_route(tmp_path, pane_title='codex: windows-dev'))
 
     assert target == '42'
     assert runner.calls == [['wezterm', 'cli', 'list', '--format', 'json']]
@@ -70,7 +70,7 @@ def test_resolve_target_supports_title_regex(tmp_path: Path):
                 {
                     'pane_id': 55,
                     'workspace': 'codex',
-                    'title': 'Codex: windows-dev',
+                    'title': 'codex: windows-dev',
                     'cwd': 'file:///Users/test/project',
                 }
             )
@@ -78,7 +78,7 @@ def test_resolve_target_supports_title_regex(tmp_path: Path):
     )
     backend = WezTermBackend(wezterm_bin='wezterm', runner=runner)
 
-    target = backend.resolve_target(make_route(tmp_path, pane_title_regex='^Codex: windows-.*$'))
+    target = backend.resolve_target(make_route(tmp_path, pane_title_regex='^codex: windows-.*$'))
 
     assert target == '55'
 
@@ -88,7 +88,7 @@ def test_resolve_target_rejects_zero_matches(tmp_path: Path):
     backend = WezTermBackend(wezterm_bin='wezterm', runner=runner)
 
     with pytest.raises(ValueError, match='Unable to resolve WezTerm pane'):
-        backend.resolve_target(make_route(tmp_path, pane_title='Codex: windows-dev'))
+        backend.resolve_target(make_route(tmp_path, pane_title='codex: windows-dev'))
 
 
 def test_resolve_target_rejects_multiple_matches(tmp_path: Path):
@@ -98,13 +98,13 @@ def test_resolve_target_rejects_multiple_matches(tmp_path: Path):
                 {
                     'pane_id': 41,
                     'workspace': 'codex',
-                    'title': 'Codex: windows-dev',
+                    'title': 'codex: windows-dev',
                     'cwd': 'file:///Users/test/project-a',
                 },
                 {
                     'pane_id': 42,
                     'workspace': 'codex',
-                    'title': 'Codex: windows-dev',
+                    'title': 'codex: windows-dev',
                     'cwd': 'file:///Users/test/project-b',
                 },
             )
@@ -113,7 +113,7 @@ def test_resolve_target_rejects_multiple_matches(tmp_path: Path):
     backend = WezTermBackend(wezterm_bin='wezterm', runner=runner)
 
     with pytest.raises(ValueError, match='matched multiple WezTerm panes'):
-        backend.resolve_target(make_route(tmp_path, pane_title='Codex: windows-dev'))
+        backend.resolve_target(make_route(tmp_path, pane_title='codex: windows-dev'))
 
 
 def test_get_current_path_reads_cwd_from_list_output(tmp_path: Path):
@@ -123,7 +123,7 @@ def test_get_current_path_reads_cwd_from_list_output(tmp_path: Path):
                 {
                     'pane_id': 42,
                     'workspace': 'codex',
-                    'title': 'Codex: windows-dev',
+                    'title': 'codex: windows-dev',
                     'cwd': 'file:///C:/Users/test/project',
                 }
             )
@@ -131,7 +131,7 @@ def test_get_current_path_reads_cwd_from_list_output(tmp_path: Path):
     )
     backend = WezTermBackend(wezterm_bin='wezterm', runner=runner)
 
-    current_path = backend.get_current_path(make_route(tmp_path, pane_title='Codex: windows-dev'))
+    current_path = backend.get_current_path(make_route(tmp_path, pane_title='codex: windows-dev'))
 
     assert current_path == 'C:/Users/test/project'
 
@@ -153,7 +153,7 @@ def test_send_message_uses_send_text_and_returns_latest_tail(tmp_path: Path):
                 {
                     'pane_id': 42,
                     'workspace': 'codex',
-                    'title': 'Codex: windows-dev',
+                    'title': 'codex: windows-dev',
                     'cwd': 'file:///C:/Users/test/project',
                 }
             ),
@@ -163,7 +163,7 @@ def test_send_message_uses_send_text_and_returns_latest_tail(tmp_path: Path):
     )
     backend = WezTermBackend(wezterm_bin='wezterm', runner=runner)
 
-    result = backend.send_message(make_route(tmp_path, pane_title='Codex: windows-dev'), 'refine it')
+    result = backend.send_message(make_route(tmp_path, pane_title='codex: windows-dev'), 'refine it')
 
     assert result.target == '42'
     assert result.running is True
@@ -181,7 +181,7 @@ def test_send_interrupt_sends_escape_character_without_paste(tmp_path: Path):
                 {
                     'pane_id': 42,
                     'workspace': 'codex',
-                    'title': 'Codex: windows-dev',
+                    'title': 'codex: windows-dev',
                     'cwd': 'file:///C:/Users/test/project',
                 }
             ),
@@ -191,7 +191,7 @@ def test_send_interrupt_sends_escape_character_without_paste(tmp_path: Path):
     )
     backend = WezTermBackend(wezterm_bin='wezterm', runner=runner)
 
-    result = backend.send_interrupt(make_route(tmp_path, pane_title='Codex: windows-dev'))
+    result = backend.send_interrupt(make_route(tmp_path, pane_title='codex: windows-dev'))
 
     assert result.target == '42'
     assert result.running is False

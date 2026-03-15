@@ -278,7 +278,7 @@ def test_load_bridge_routes_supports_wezterm_terminal_target(tmp_path: Path):
                         'channel_id': 333,
                         'terminal_target': {
                             'workspace': 'codex',
-                            'pane_title_regex': '^Codex: windows-dev$',
+                            'pane_title_regex': '^codex: windows-dev$',
                             'cwd_contains': 'projectHome',
                         },
                         'state_path': './state/windows-dev.json',
@@ -313,7 +313,7 @@ def test_load_bridge_routes_supports_wezterm_terminal_target(tmp_path: Path):
     assert routes[0].tmux_session == ''
     assert routes[0].terminal_target == WezTermTargetConfig(
         workspace='codex',
-        pane_title_regex='^Codex: windows-dev$',
+        pane_title_regex='^codex: windows-dev$',
         cwd_contains='projectHome',
     )
 

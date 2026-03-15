@@ -146,7 +146,7 @@ COMPLETION_LINES=100
       "channel_id": 234567890123456789,
       "terminal_target": {
         "workspace": "codex",
-        "pane_title_regex": "^Codex: windows-dev$",
+        "pane_title_regex": "^codex: windows-dev$",
         "cwd_contains": "projectHome"
       },
       "state_path": "./state/bridge_state_windows_dev.json"
