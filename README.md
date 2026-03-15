@@ -1,22 +1,23 @@
 # Discord Codex Bridge
 
-一个独立 sidecar 服务：**单个进程**同时桥接多个 Discord 频道到多个 tmux 里的 Codex 会话。它运行在 OpenClaw 外部，所以即使 OpenClaw 主进程不在线，桥接仍然可用。
+一个独立 sidecar 服务：**单个进程**同时桥接多个 Discord 频道到多个终端里的 Codex 会话。它运行在 OpenClaw 外部，所以即使 OpenClaw 主进程不在线，桥接仍然可用。
 
 ## What It Does
 
-- 一个 bot token + 一个进程，管理多条 Discord ↔ tmux 路由
+- 一个 bot token + 一个进程，管理多条 Discord ↔ 终端会话路由
 - 每条路由独立维护自己的活跃任务、队列、进度节奏和状态文件
 - 路由之间互不阻塞：某个会话在忙，不会卡住其它会话
 - 支持配置文件热重载；配置错误时保留 last-known-good 运行态
 - 任务完成时发送尾部输出；运行中支持中断、排队和插入消息
+- Linux 默认使用 `tmux`，Windows 默认使用 `WezTerm`
 
 ## Runtime Shortcuts
 
 当某条路由对应的 Codex 正在运行时，bot 支持这些快捷指令：
 
 - `h`：查看快捷方式说明文档
-- `ai <text>`：直接调用 AI 处理本地上下文，不把消息发给 tmux
-- `f [lines]`：直接抓取当前 tmux pane 的尾部输出，默认最后 100 行
+- `ai <text>`：直接调用 AI 处理本地上下文，不把消息发给终端会话
+- `f [lines]`：直接抓取当前终端会话的尾部输出，默认最后 100 行
 - `p`：查看当前路由的自动抓取设置
 - `p <interval_sec> <lines>`：设置当前路由自动抓取的时间间隔和抓取行数
 - `e`：发送 `Esc` 中断当前运行
@@ -24,17 +25,17 @@
 - `qx`：清空该路由自己的排队消息
 - `i <text>`：立即把消息插入当前正在运行的 Codex 会话
 
-如果某条路由仍在运行，而用户发送的是普通消息，bot 会返回快捷指令提示和最新 tmux 输出片段，而不是静默排队。
+如果某条路由仍在运行，而用户发送的是普通消息，bot 会返回快捷指令提示和最新终端输出片段，而不是静默排队。
 
 ### `ai` Shortcut
 
-`ai` 用于让 bridge **直接**调用 AI 处理请求，而不是把文本注入 tmux。当前实现会：
+`ai` 用于让 bridge **直接**调用 AI 处理请求，而不是把文本注入终端会话。当前实现会：
 
 - 复用本机 `~/.codex/config.toml` 里的模型配置
 - 复用本机 `~/.codex/auth.json` 里的认证信息
 - **不会**调用 `codex exec`
-- 自动把当前路由名、tmux session、tmux 最新输出、当前忙碌状态、tmux pane 工作目录作为上下文喂给 AI
-- 允许 AI 在当前 tmux 工作目录内查找并读取文本文件，然后把结果直接回复到 Discord
+- 自动把当前路由名、终端目标标识、最新输出、当前忙碌状态、当前工作目录作为上下文喂给 AI
+- 允许 AI 在当前终端工作目录内查找并读取文本文件，然后把结果直接回复到 Discord
 
 例如用户发送：
 
@@ -68,11 +69,22 @@ p 60 200
 ## Requirements
 
 - Python 3.10+
-- `tmux`
+- Linux: `tmux`
+- Windows: `WezTerm`
 - 已加入服务器的 Discord bot
 - 为 bot 开启 Discord `MESSAGE CONTENT INTENT`
-- 每条路由目标 tmux pane 中已经有一个可交互的 Codex TUI
+- 每条路由目标终端中已经有一个可交互的 Codex TUI
 - 如果要使用 `ai`，本机还需要已有可用的 Codex CLI 配置文件：`~/.codex/config.toml` 和 `~/.codex/auth.json`
+
+## Backend Model
+
+第一期跨平台支持采用**单进程单 backend**：
+
+- `TERMINAL_BACKEND=auto`：Linux 选 `tmux`，Windows 选 `wezterm`
+- `TERMINAL_BACKEND=tmux`：显式使用 `tmux`
+- `TERMINAL_BACKEND=wezterm`：显式使用 `WezTerm`
+
+当前**不支持**同一个 bridge 进程里部分路由走 `tmux`、部分路由走 `WezTerm`。
 
 ## Configuration
 
@@ -83,7 +95,9 @@ p 60 200
 ```env
 DISCORD_BOT_TOKEN=your_bot_token
 BRIDGES_CONFIG_PATH=./bridges.local.json
+TERMINAL_BACKEND=auto
 TMUX_BIN=/absolute/path/to/tmux
+WEZTERM_BIN=wezterm
 TMUX_WINDOW=0
 TMUX_PANE=0
 CHECK_INTERVAL_SEC=5
@@ -96,23 +110,19 @@ COMPLETION_LINES=100
 
 - `DISCORD_BOT_TOKEN` 只放在本地 `.env`，不要提交到仓库
 - `BRIDGES_CONFIG_PATH` 指向本地多路由 JSON 配置
-- `TMUX_BIN` 建议写绝对路径，方便在 `systemd --user` 下运行
-- `TMUX_WINDOW`、`TMUX_PANE`、轮询/进度参数是全局默认值，单路由可覆盖
+- `TERMINAL_BACKEND` 默认为 `auto`
+- `TMUX_BIN` 建议在 Linux 上写绝对路径，方便在 `systemd --user` 下运行
+- `WEZTERM_BIN` 默认为 `wezterm`
+- `TMUX_WINDOW`、`TMUX_PANE`、轮询/进度参数是全局默认值；只有 `tmux` backend 会用到前两个字段
 
 ### 2. Route Settings In `bridges.local.json`
 
-复制 `bridges.example.json` 为本地 `bridges.local.json`，这里只放**各路由配置**。示例：
+复制 `bridges.example.json` 为本地 `bridges.local.json`，这里只放**各路由配置**。
+
+### Linux / tmux Route Example
 
 ```json
 {
-  "defaults": {
-    "tmux_window": 0,
-    "tmux_pane": 0,
-    "check_interval_sec": 5,
-    "progress_interval_sec": 300,
-    "progress_capture_lines": 220,
-    "completion_lines": 100
-  },
   "bridges": [
     {
       "name": "backup",
@@ -120,30 +130,62 @@ COMPLETION_LINES=100
       "channel_id": 123456789012345678,
       "tmux_session": "session_alpha",
       "state_path": "./state/bridge_state_backup.json"
-    },
-    {
-      "name": "evolution",
-      "enabled": true,
-      "channel_id": 234567890123456789,
-      "tmux_session": "session_beta",
-      "state_path": "./state/bridge_state_evolution.json"
     }
   ]
 }
 ```
 
-每条路由至少需要：
+### Windows / WezTerm Route Example
+
+```json
+{
+  "bridges": [
+    {
+      "name": "windows-dev",
+      "enabled": true,
+      "channel_id": 234567890123456789,
+      "terminal_target": {
+        "workspace": "codex",
+        "pane_title_regex": "^Codex: windows-dev$",
+        "cwd_contains": "projectHome"
+      },
+      "state_path": "./state/bridge_state_windows_dev.json"
+    }
+  ]
+}
+```
+
+`bridges.example.json` 同时展示了两种目标形状。运行时请只保留与你当前 `TERMINAL_BACKEND` 对应的那类路由。
+
+字段说明：
+
+- 每条路由至少都需要：
+  - `name`
+  - `channel_id`
+  - `state_path`
+- `tmux` route 需要：
+  - `tmux_session`
+  - 可选 `tmux_window`、`tmux_pane`
+- `wezterm` route 需要：
+  - `terminal_target.workspace`
+  - 可选 `terminal_target.pane_title`
+  - 可选 `terminal_target.pane_title_regex`
+  - 可选 `terminal_target.cwd_contains`
+
+WezTerm selector 解析顺序：
+
+- 先按 `workspace` 过滤
+- 再按 `pane_title` 精确匹配
+- 再按 `pane_title_regex` 正则匹配
+- 再按 `cwd_contains` 做路径子串过滤
+- 命中 0 个或多个 pane 都会视为配置/解析失败
+
+通用说明：
 
 - `name`：稳定路由名，用于识别和热重载 diff
-- `channel_id`：Discord 频道 ID
-- `tmux_session`：目标 tmux session 名
-- `state_path`：该路由独立状态文件路径
-
-说明：
-
-- `bridges.example.json` 只放占位值，真实频道/会话名只写入本地 `bridges.local.json`
 - `enabled: false` 的路由会被忽略，不会启动
 - `state_path` 建议每条路由单独一个文件，避免状态互相污染
+- `bridges.example.json` 只放占位值，真实频道/会话名只写入本地 `bridges.local.json`
 
 ## Privacy And Git Hygiene
 
@@ -159,7 +201,7 @@ COMPLETION_LINES=100
 - `.env.example`
 - `bridges.example.json`
 
-这意味着可以安全提交配置结构、字段说明和占位示例，但**不要**提交真实 token、真实频道 ID、真实 tmux session 名或真实状态文件路径。
+这意味着可以安全提交配置结构、字段说明和占位示例，但**不要**提交真实 token、真实频道 ID、真实 tmux session 名、真实 WezTerm selector 或真实状态文件路径。
 
 ## Hot Reload
 
@@ -182,9 +224,21 @@ cp bridges.example.json bridges.local.json
 python -m discord_codex_bridge --env-file .env
 ```
 
+Windows PowerShell 示例：
+
+```powershell
+cd E:\projectHome\discord-codex-bridge
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+Copy-Item .env.example .env
+Copy-Item bridges.example.json bridges.local.json
+python -m discord_codex_bridge --env-file .env
+```
+
 ## Migration From Old Per-Route Services
 
-如果你以前是“一条路由一个服务 / 一个 `.env.xxx` / 一个 systemd unit”：
+如果你以前是“一条路由一个服务 / 一个 `.env.xxx` / 一个 systemd unit` / 一个 Windows 启动任务”：
 
 1. 把 bot token 和全局默认参数收敛到一个 `.env`
 2. 把各路由的 `channel_id`、`tmux_session`、`state_path` 合并进一个 `bridges.local.json`
@@ -200,7 +254,7 @@ cd /path/to/discord-codex-bridge
 pytest -q
 ```
 
-## systemd
+## Linux systemd
 
 推荐使用新的单进程 unit：`systemd/discord-codex-multi-bridge.service`。
 
@@ -216,8 +270,19 @@ systemctl --user status discord-codex-multi-bridge.service
 
 仓库中保留 `systemd/discord-codex-bridge.service` 作为旧命名示例；新部署默认使用 `discord-codex-multi-bridge.service`。
 
+## Windows Startup
+
+Windows 没有 `systemd --user`。推荐把 bridge 放到一个登录后启动的任务里，例如 Task Scheduler：
+
+```powershell
+schtasks /create /tn "discord-codex-bridge" /sc onlogon /tr "powershell -NoProfile -ExecutionPolicy Bypass -Command `"cd E:\projectHome\discord-codex-bridge; .\.venv\Scripts\Activate.ps1; python -m discord_codex_bridge --env-file .env`"" /f
+```
+
+这只是一个最小示例。实际部署时建议把启动命令收敛到单独脚本里，再让任务调度器调用脚本。
+
 ## Design Boundaries
 
-- 服务只处理 `bridges.local.json` 中明确声明的频道，不会把其他频道消息转进 tmux
-- 默认行为仍然是“请求转发 + 周期性进度 + 完成摘要”，不会把 tmux 全量实时镜像到 Discord
-- 如果 tmux 目标暂时不可解析，服务会记录日志并在后续轮询继续重试，而不是直接丢消息或篡改状态
+- 服务只处理 `bridges.local.json` 中明确声明的频道，不会把其他频道消息转进终端会话
+- 默认行为仍然是“请求转发 + 周期性进度 + 完成摘要”，不会把终端全量实时镜像到 Discord
+- 如果目标终端暂时不可解析，服务会记录日志并在后续轮询继续重试，而不是直接丢消息或篡改状态
+- `WezTerm` backend 的中断当前通过原始 `ESC` 文本注入实现；如果目标应用对 `ESC` 处理方式不同，实际效果以运行时行为为准

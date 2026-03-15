@@ -16,11 +16,15 @@
       "state_path": "./state/bridge_state_backup.json"
     },
     {
-      "name": "evolution",
-      "enabled": true,
+      "name": "windows-dev",
+      "enabled": false,
       "channel_id": 234567890123456789,
-      "tmux_session": "session_beta",
-      "state_path": "./state/bridge_state_evolution.json"
+      "terminal_target": {
+        "workspace": "codex",
+        "pane_title_regex": "^Codex: windows-dev$",
+        "cwd_contains": "projectHome"
+      },
+      "state_path": "./state/bridge_state_windows_dev.json"
     }
   ]
 }
