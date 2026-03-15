@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from discord_codex_bridge.ai import build_responses_api_url, load_codex_model_config
+from discord_codex_bridge.backend_factory import create_terminal_backend
 from discord_codex_bridge.config import (
     Settings,
     load_bridge_routes,
@@ -14,6 +15,8 @@ from discord_codex_bridge.models import WezTermTargetConfig
 from discord_codex_bridge.state import JsonStateStore
 from discord_codex_bridge.shortcuts import parse_shortcut_command
 from discord_codex_bridge.summary import split_discord_message
+from discord_codex_bridge.tmux_bridge import TmuxTerminalBackend
+from discord_codex_bridge.wezterm_backend import WezTermBackend
 
 
 def test_load_env_file_applies_missing_values_only(tmp_path: Path):
@@ -82,6 +85,65 @@ def test_resolve_terminal_backend_name_uses_wezterm_for_windows():
 
 def test_resolve_terminal_backend_name_preserves_explicit_value():
     assert resolve_terminal_backend_name('wezterm', platform='linux') == 'wezterm'
+
+
+def test_create_terminal_backend_uses_tmux_for_linux_auto(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+        },
+        base_dir=tmp_path,
+    )
+
+    backend = create_terminal_backend(settings, platform='linux')
+
+    assert isinstance(backend, TmuxTerminalBackend)
+
+
+def test_create_terminal_backend_uses_wezterm_for_windows_auto(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+        },
+        base_dir=tmp_path,
+    )
+
+    backend = create_terminal_backend(settings, platform='win32')
+
+    assert isinstance(backend, WezTermBackend)
+
+
+def test_create_terminal_backend_respects_explicit_backend(tmp_path: Path):
+    settings = Settings.from_env(
+        {
+            'DISCORD_BOT_TOKEN': 'token',
+            'TERMINAL_BACKEND': 'wezterm',
+        },
+        base_dir=tmp_path,
+    )
+
+    backend = create_terminal_backend(settings, platform='linux')
+
+    assert isinstance(backend, WezTermBackend)
+
+
+def test_create_terminal_backend_rejects_unknown_backend(tmp_path: Path):
+    settings = Settings(
+        discord_bot_token='token',
+        tmux_bin='tmux',
+        tmux_window=0,
+        tmux_pane=0,
+        check_interval_sec=5,
+        progress_interval_sec=300,
+        progress_capture_lines=220,
+        completion_lines=100,
+        bridges_config_path=(tmp_path / 'bridges.local.json').resolve(),
+        terminal_backend='bad-backend',
+        wezterm_bin='wezterm',
+    )
+
+    with pytest.raises(ValueError, match='Unsupported TERMINAL_BACKEND'):
+        create_terminal_backend(settings, platform='linux')
 
 
 def test_settings_default_check_interval_is_5_seconds(tmp_path: Path):

@@ -10,7 +10,7 @@ from discord_codex_bridge.service import DiscordCodexBridge
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Discord <-> tmux Codex multi-bridge service")
+    parser = argparse.ArgumentParser(description="Run the Discord <-> terminal Codex multi-bridge service")
     parser.add_argument("--env-file", default=".env", help="Path to env file with global bridge settings")
     args = parser.parse_args()
 

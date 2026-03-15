@@ -53,8 +53,9 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in tests without dis
         abc=SimpleNamespace(Messageable=object),
     )
 
-from discord_codex_bridge.config import Settings, load_bridge_routes
 from discord_codex_bridge.ai import AiCommandRunner, AiRequestContext
+from discord_codex_bridge.backend_factory import create_terminal_backend
+from discord_codex_bridge.config import Settings, load_bridge_routes
 from discord_codex_bridge.controller import BridgeController
 from discord_codex_bridge.models import BridgeRouteConfig, DiscordRequest
 from discord_codex_bridge.shortcuts import (
@@ -117,10 +118,12 @@ class DiscordCodexBridge(discord.Client):
         super().__init__(intents=intents)
 
         self.settings = settings
-        self.terminal = terminal_backend or TmuxTerminalBackend(
-            tmux_bin=settings.tmux_bin,
-            tmux=tmux_bridge,
-        )
+        if terminal_backend is not None:
+            self.terminal = terminal_backend
+        elif tmux_bridge is not None:
+            self.terminal = TmuxTerminalBackend(tmux=tmux_bridge, tmux_bin=settings.tmux_bin)
+        else:
+            self.terminal = create_terminal_backend(settings)
         self.route_loader = route_loader
         self.ai_runner = ai_runner or AiCommandRunner()
         self.monitor_task: asyncio.Task[None] | None = None
